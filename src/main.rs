@@ -125,24 +125,18 @@ impl State {
     }
 
     fn rgb_to_oklch(&mut self) {
-        match self.color {
-            CurrentColor::Srgb(color) => {
-                self.color = CurrentColor::Oklch(color.convert::<Oklch>());
-            }
-            _ => {}
+        if let CurrentColor::Srgb(color) = self.color {
+            self.color = CurrentColor::Oklch(color.convert::<Oklch>());
         }
     }
 
     fn oklch_to_rgb(&mut self) {
-        match self.color {
-            CurrentColor::Oklch(color) => {
-                let mut converted = color.convert::<Srgb>();
-                converted.components[0] = converted.components[0].clamp(0.0, 1.0);
-                converted.components[1] = converted.components[1].clamp(0.0, 1.0);
-                converted.components[2] = converted.components[2].clamp(0.0, 1.0);
-                self.color = CurrentColor::Srgb(converted);
-            }
-            _ => {}
+        if let CurrentColor::Oklch(color) = self.color {
+            let mut converted = color.convert::<Srgb>();
+            converted.components[0] = converted.components[0].clamp(0.0, 1.0);
+            converted.components[1] = converted.components[1].clamp(0.0, 1.0);
+            converted.components[2] = converted.components[2].clamp(0.0, 1.0);
+            self.color = CurrentColor::Srgb(converted);
         }
     }
 
@@ -175,7 +169,7 @@ impl State {
                                 color.components[2] -= 360.0
                             }
                         }
-                        _ => return,
+                        _ => (),
                     },
                     CurrentColor::Srgb(color) => {
                         color.components[component_index] =
@@ -216,10 +210,10 @@ impl State {
     }
 
     fn copy_to_clipboard(&self) {
-        if let Ok(mut clipboard) = Clipboard::new() {
-            if let Err(e) = clipboard.set_text(self.hex.clone()) {
-                eprintln!("Failed to copy to clipboard: {}", e);
-            }
+        if let Ok(mut clipboard) = Clipboard::new()
+            && let Err(e) = clipboard.set_text(self.hex.clone())
+        {
+            eprintln!("Failed to copy to clipboard: {}", e);
         }
     }
 
@@ -231,33 +225,32 @@ impl State {
                 *current_error = None;
             });
         }
-        if let Ok(mut clipboard) = Clipboard::new() {
-            if let Ok(text) = clipboard.get_text() {
-                let trimmed = text.trim();
-                let Some(parsed) = parse_color(&trimmed)
-                    .ok()
-                    .or(parse_color(format!("#{}", trimmed).as_str()).ok())
-                else {
-                    self.error = Arc::new(Mutex::new(Some("Color parsing failed".to_string())));
+        if let Ok(mut clipboard) = Clipboard::new()
+            && let Ok(text) = clipboard.get_text()
+        {
+            let trimmed = text.trim();
+            let Some(parsed) = parse_color(trimmed)
+                .ok()
+                .or(parse_color(format!("#{}", trimmed).as_str()).ok())
+            else {
+                self.error = Arc::new(Mutex::new(Some("Color parsing failed".to_string())));
+                delay_clear_error(self.error.clone(), app);
+                return;
+            };
+            match parsed.cs {
+                ColorSpaceTag::Srgb => {
+                    self.color = CurrentColor::Srgb(parsed.to_alpha_color::<Srgb>());
+                    self.oklch_mode = false;
+                    self.mode_picker.on = self.oklch_mode;
+                }
+                ColorSpaceTag::Oklch => {
+                    self.color = CurrentColor::Oklch(parsed.to_alpha_color::<Oklch>());
+                    self.oklch_mode = true;
+                    self.mode_picker.on = self.oklch_mode;
+                }
+                _ => {
+                    self.error = Arc::new(Mutex::new(Some("Unsupported color space".to_string())));
                     delay_clear_error(self.error.clone(), app);
-                    return;
-                };
-                match parsed.cs {
-                    ColorSpaceTag::Srgb => {
-                        self.color = CurrentColor::Srgb(parsed.to_alpha_color::<Srgb>());
-                        self.oklch_mode = false;
-                        self.mode_picker.on = self.oklch_mode;
-                    }
-                    ColorSpaceTag::Oklch => {
-                        self.color = CurrentColor::Oklch(parsed.to_alpha_color::<Oklch>());
-                        self.oklch_mode = true;
-                        self.mode_picker.on = self.oklch_mode;
-                    }
-                    _ => {
-                        self.error =
-                            Arc::new(Mutex::new(Some("Unsupported color space".to_string())));
-                        delay_clear_error(self.error.clone(), app);
-                    }
                 }
             }
         }
@@ -484,7 +477,7 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
         let oklch_mode = s.oklch_mode;
         let contrasting_highlight = {
             let luminance = s.color.display().discard_alpha().relative_luminance();
-            if luminance < 0.15 || luminance > 0.7 {
+            if !(0.15..0.7).contains(&luminance) {
                 s.theme_inverted(Theme::Gray0)
             } else {
                 s.color.display()
@@ -513,10 +506,8 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                                     if let Ok(value) = new.parse::<f32>() {
                                         s.color.components_mut()[i] = value;
                                     }
-                                } else {
-                                    if let Ok(value) = new.parse::<u8>() {
-                                        s.color.components_mut()[i] = value as f32 / 255.;
-                                    }
+                                } else if let Ok(value) = new.parse::<u8>() {
+                                    s.color.components_mut()[i] = value as f32 / 255.;
                                 }
                             }
                             EditInteraction::End => {
@@ -536,11 +527,8 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                                     State::update_component(&mut s.color, i, drag);
                                     s.sync_component_fields();
                                     s.update_text();
-                                    match drag {
-                                        DragState::Began { .. } => {
-                                            a.end_editing(s);
-                                        }
-                                        _ => (),
+                                    if let DragState::Began { .. } = drag {
+                                        a.end_editing(s);
                                     }
                                 })
                                 .finish(),
