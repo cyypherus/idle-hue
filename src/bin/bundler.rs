@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Creating Windows zip...");
     let windows_zip_status = Command::new("zip")
-        .args(&["-j", "idle-hue-windows.zip", "idle-hue.exe"])
+        .args(&["-j", "idle-hue-windows-x86_64-gnu.zip", "idle-hue.exe"])
         .current_dir(windows_exe_path.parent().unwrap())
         .status()?;
 
@@ -137,10 +137,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let windows_zip_src = windows_exe_path
         .parent()
         .unwrap()
-        .join("idle-hue-windows.zip");
+        .join("idle-hue-windows-x86_64-gnu.zip");
     let arm_zip_dest = project_root.join("idle-hue-macos-arm.zip");
     let intel_zip_dest = project_root.join("idle-hue-macos-intel.zip");
-    let windows_zip_dest = project_root.join("idle-hue-windows.zip");
+    let windows_zip_dest = project_root.join("idle-hue-windows-x86_64-gnu.zip");
 
     if arm_zip_src.exists() {
         fs::rename(&arm_zip_src, &arm_zip_dest)?;
