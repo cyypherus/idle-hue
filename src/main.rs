@@ -1,8 +1,9 @@
-use std::sync::Arc;
+#![windows_subsystem = "windows"]
 
 use arboard::Clipboard;
 use parley::FontWeight;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use ui::*;
 use vello_svg::vello::{

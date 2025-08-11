@@ -55,9 +55,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    println!("Building for Windows (x86_64)...");
+    let windows_status = Command::new("cargo")
+        .args(&[
+            "build",
+            "--target",
+            "x86_64-pc-windows-gnu",
+            "--release",
+            "--bin",
+            "idle-hue",
+        ])
+        .current_dir(&project_root)
+        .status()?;
+
+    if !windows_status.success() {
+        eprintln!("Failed to build Windows executable");
+        std::process::exit(1);
+    }
+
     let arm_bundle_path = project_root.join("target/release/bundle/osx/idle-hue.app");
     let intel_bundle_path =
         project_root.join("target/x86_64-apple-darwin/release/bundle/osx/idle-hue.app");
+    let windows_exe_path = project_root.join("target/x86_64-pc-windows-gnu/release/idle-hue.exe");
 
     if !arm_bundle_path.exists() {
         eprintln!("ARM bundle not found at {:?}", arm_bundle_path);
@@ -66,6 +85,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !intel_bundle_path.exists() {
         eprintln!("Intel bundle not found at {:?}", intel_bundle_path);
+        std::process::exit(1);
+    }
+
+    if !windows_exe_path.exists() {
+        eprintln!("Windows executable not found at {:?}", windows_exe_path);
         std::process::exit(1);
     }
 
@@ -91,6 +115,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    println!("Creating Windows zip...");
+    let windows_zip_status = Command::new("zip")
+        .args(&["-j", "idle-hue-windows.zip", "idle-hue.exe"])
+        .current_dir(windows_exe_path.parent().unwrap())
+        .status()?;
+
+    if !windows_zip_status.success() {
+        eprintln!("Failed to create Windows zip");
+        std::process::exit(1);
+    }
+
     let arm_zip_src = arm_bundle_path
         .parent()
         .unwrap()
@@ -99,8 +134,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .unwrap()
         .join("idle-hue-macos-intel.zip");
+    let windows_zip_src = windows_exe_path
+        .parent()
+        .unwrap()
+        .join("idle-hue-windows.zip");
     let arm_zip_dest = project_root.join("idle-hue-macos-arm.zip");
     let intel_zip_dest = project_root.join("idle-hue-macos-intel.zip");
+    let windows_zip_dest = project_root.join("idle-hue-windows.zip");
 
     if arm_zip_src.exists() {
         fs::rename(&arm_zip_src, &arm_zip_dest)?;
@@ -110,6 +150,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if intel_zip_src.exists() {
         fs::rename(&intel_zip_src, &intel_zip_dest)?;
         println!("Created: {}", intel_zip_dest.display());
+    }
+
+    if windows_zip_src.exists() {
+        fs::rename(&windows_zip_src, &windows_zip_dest)?;
+        println!("Created: {}", windows_zip_dest.display());
     }
 
     println!("Bundle process completed successfully!");
