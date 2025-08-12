@@ -4,10 +4,12 @@ use semver::Version;
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
-
 use tempfile::TempDir;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const GITHUB_API_URL: &str = "https://api.github.com";
 const REPO_OWNER: &str = "cyypherus";
@@ -311,27 +313,27 @@ impl AutoUpdater {
         Err(anyhow::anyhow!("Could not find .app bundle"))
     }
 
-    pub fn restart_application() -> Result<()> {
+    pub async fn restart_application() -> Result<()> {
         let current_exe = env::current_exe()?;
 
         #[cfg(target_os = "windows")]
         {
-            std::process::Command::new(&current_exe).spawn()?;
+            let args: Vec<String> = env::args().collect();
+            std::process::Command::new(&current_exe)
+                .creation_flags(0x00000008) // DETACHED_PROCESS
+                .spawn()?;
         }
 
         #[cfg(target_os = "macos")]
         {
             let app_bundle = Self::find_app_bundle(&current_exe)?;
             std::process::Command::new("open")
+                .arg("-n")
                 .arg(&app_bundle)
                 .spawn()?;
         }
 
-        #[cfg(target_os = "linux")]
-        {
-            std::process::Command::new(&current_exe).spawn()?;
-        }
-
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         std::process::exit(0);
     }
 

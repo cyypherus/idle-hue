@@ -677,9 +677,11 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
             .on_click(move |s: &mut State, app| {
                 let current_status = s.update_status.try_lock().unwrap().clone();
                 if matches!(current_status, auto_update::UpdateStatus::Updated { .. }) {
-                    if let Err(e) = AutoUpdater::restart_application() {
-                        log::error!("Failed to restart application: {}", e);
-                    }
+                    app.spawn(async move {
+                        if let Err(e) = AutoUpdater::restart_application().await {
+                            log::error!("Failed to restart application: {}", e);
+                        }
+                    });
                 } else if !matches!(current_status, auto_update::UpdateStatus::Checking) {
                     *s.update_status.blocking_lock() = auto_update::UpdateStatus::Checking;
                     let status = s.update_status.clone();
