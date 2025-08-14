@@ -1,15 +1,13 @@
 #![windows_subsystem = "windows"]
 
 use arboard::Clipboard;
+use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
+use kurbo::Point;
 use parley::FontWeight;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ui::*;
-use vello_svg::vello::{
-    kurbo::Point,
-    peniko::color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color},
-};
 
 const GRAY_0_D: Color = Color::from_rgb8(0x00, 0x00, 0x00); // #000000
 const GRAY_30_D: Color = Color::from_rgb8(0x1e, 0x1e, 0x1e); // #1e1e1e
@@ -60,7 +58,7 @@ impl CurrentColor {
             CurrentColor::Oklch(color) => &mut color.components,
         }
     }
-    fn display(&self) -> AlphaColor<Srgb> {
+    fn display(&self) -> Color {
         match self {
             CurrentColor::Srgb(color) => color.convert::<Srgb>(),
             CurrentColor::Oklch(color) => color.convert::<Srgb>(),
@@ -74,15 +72,15 @@ struct SavedState {
 }
 
 impl State {
-    fn theme(&self, palette: Theme) -> AlphaColor<Srgb> {
+    fn theme(&self, palette: Theme) -> Color {
         self.theme_color_invert(palette, false)
     }
 
-    fn theme_inverted(&self, palette: Theme) -> AlphaColor<Srgb> {
+    fn theme_inverted(&self, palette: Theme) -> Color {
         self.theme_color_invert(palette, true)
     }
 
-    fn theme_color_invert(&self, palette: Theme, invert: bool) -> AlphaColor<Srgb> {
+    fn theme_color_invert(&self, palette: Theme, invert: bool) -> Color {
         let dark_mode = if invert {
             !self.dark_mode
         } else {
@@ -361,8 +359,8 @@ fn main() {
             ])
         })
     })
-    .inner_size(450, 350)
-    .resizable(false)
+    // .inner_size(450, 350)
+    // .resizable(false)
     .start()
 }
 
@@ -372,7 +370,7 @@ fn copy_button<'n>() -> Node<'n, State, AppState<State>> {
         button(id!(), binding!(State, copy_button))
             .corner_rounding(10.)
             .fill(s.theme(Theme::Gray30))
-            .label(move |button| {
+            .label(move |_, button| {
                 svg(id!(), include_str!("assets/copy.svg"))
                     .fill({
                         match (button.depressed, button.hovered) {
@@ -400,7 +398,7 @@ fn theme_button<'n>() -> Node<'n, State, AppState<State>> {
         button(id!(), binding!(State, light_dark_mode_button))
             .corner_rounding(10.)
             .fill(s.theme(Theme::Gray30))
-            .label(move |button| {
+            .label(move |_, button| {
                 svg(
                     id!(),
                     if dark_mode {
@@ -434,7 +432,7 @@ fn paste_button<'n>() -> Node<'n, State, AppState<State>> {
         button(id!(), binding!(State, paste_button))
             .corner_rounding(10.)
             .fill(s.theme(Theme::Gray30))
-            .label(move |button| {
+            .label(move |_, button| {
                 svg(id!(), include_str!("assets/paste.svg"))
                     .fill({
                         match (button.depressed, button.hovered) {
