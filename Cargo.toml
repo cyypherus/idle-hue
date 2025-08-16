@@ -13,6 +13,8 @@ tokio = { version = "1.43.0", features = ["fs"] }
 parley = "0.5.0"
 color = "0.3.1"
 kurbo = "0.11.3"
+directories = "5.0"
+dark-light = "1.1"
 
 [package.metadata.bundle.bin.idle-hue]
 name = "idle-hue"
