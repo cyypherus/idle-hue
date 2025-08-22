@@ -3044,7 +3044,7 @@ dependencies = [
 [[package]]
 name = "ui"
 version = "0.1.0"
-source = "git+https://github.com/cyypherus/ui#bd13e213e78338958415bc07fb41cce0e8eb7f5d"
+source = "git+https://github.com/cyypherus/ui#496d25c2ff43b5dfff705ac04b0169d2a0547c06"
 dependencies = [
  "backer",
  "clipboard-rs",
