@@ -109,10 +109,7 @@ impl AutoUpdater {
     }
 
     async fn get_latest_release(&self) -> Result<GitHubRelease> {
-        let url = format!(
-            "{}/repos/{}/{}/releases/latest",
-            GITHUB_API_URL, REPO_OWNER, REPO_NAME
-        );
+        let url = format!("{GITHUB_API_URL}/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest");
 
         let response = self
             .client
@@ -130,11 +127,8 @@ impl AutoUpdater {
     }
 
     async fn get_release_by_version(&self, version: &Version) -> Result<Option<GitHubRelease>> {
-        let tag = format!("{}", version);
-        let url = format!(
-            "{}/repos/{}/{}/releases/tags/{}",
-            GITHUB_API_URL, REPO_OWNER, REPO_NAME, tag
-        );
+        let tag = format!("{version}");
+        let url = format!("{GITHUB_API_URL}/repos/{REPO_OWNER}/{REPO_NAME}/releases/tags/{tag}");
 
         let response = self
             .client
@@ -178,7 +172,7 @@ impl AutoUpdater {
                     "macos-intel.zip".to_string()
                 }
             }
-            os => format!("{}.zip", os),
+            os => format!("{os}.zip"),
         }
     }
 
