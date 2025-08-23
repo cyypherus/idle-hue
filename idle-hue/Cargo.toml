@@ -28,6 +28,4 @@ kurbo = "0.11.3"
 [package.metadata.bundle.bin.idle-hue]
 name = "idle-hue"
 identifier = "cyy.apps.idle-hue"
-
-[profile.release]
-lto = true
+icon = ["src/assets/icon.icns"]
