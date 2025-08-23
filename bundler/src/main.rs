@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let version_file_path = project_root.join("src").join("version.txt");
-    fs::write(&version_file_path, format!("\"{git_hash}\""))?;
+    fs::write(&version_file_path, format!("\"{}\"", git_hash))?;
     println!(
         "Written git hash '{}' to {}",
         git_hash,
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Building for Apple Silicon (ARM64)...");
     let arm_status = Command::new("cargo")
-        .args(["bundle", "--release", "--bin", "idle-hue"])
+        .args(["bundle", "--release", "--bin", "idle-hue", "-p", "idle-hue"])
         .current_dir(&project_root)
         .status()?;
 
@@ -45,6 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--target",
             "x86_64-apple-darwin",
             "--bin",
+            "idle-hue",
+            "-p",
             "idle-hue",
         ])
         .current_dir(&project_root)
@@ -64,6 +66,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--release",
             "--bin",
             "idle-hue",
+            "-p",
+            "idle-hue",
         ])
         .current_dir(&project_root)
         .status()?;
@@ -79,17 +83,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let windows_exe_path = project_root.join("target/x86_64-pc-windows-gnu/release/idle-hue.exe");
 
     if !arm_bundle_path.exists() {
-        eprintln!("ARM bundle not found at {arm_bundle_path:?}");
+        eprintln!("ARM bundle not found at {:?}", arm_bundle_path);
         std::process::exit(1);
     }
 
     if !intel_bundle_path.exists() {
-        eprintln!("Intel bundle not found at {intel_bundle_path:?}");
+        eprintln!("Intel bundle not found at {:?}", intel_bundle_path);
         std::process::exit(1);
     }
 
     if !windows_exe_path.exists() {
-        eprintln!("Windows executable not found at {windows_exe_path:?}");
+        eprintln!("Windows executable not found at {:?}", windows_exe_path);
         std::process::exit(1);
     }
 
@@ -117,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Creating Windows zip...");
     let windows_zip_status = Command::new("zip")
-        .args(["-j", "idle-hue-windows-x86_64-gnu.zip", "idle-hue.exe"])
+        .args(&["-j", "idle-hue-windows-x86_64-gnu.zip", "idle-hue.exe"])
         .current_dir(windows_exe_path.parent().unwrap())
         .status()?;
 

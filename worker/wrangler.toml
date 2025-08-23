@@ -1,0 +1,19 @@
+name = "version-server"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[r2_buckets]]
+binding = "version-server-r2"
+bucket_name = "version-server-r2"
+
+[[d1_databases]]
+binding = "version-server-d1"
+database_name = "version-server-d1"
+database_id = "1f486ad5-0dcb-42bc-b97c-792551d4d067"
+migrations_dir = "migrations"
+
+[vars]
+WORKER_NAME = "version-server"
