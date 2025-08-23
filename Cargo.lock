@@ -366,6 +366,10 @@ checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 [[package]]
 name = "bundler"
 version = "0.2.0"
+dependencies = [
+ "clap",
+ "dotenv",
+]
 
 [[package]]
 name = "bytemuck"
@@ -836,6 +840,12 @@ checksum = "95249b50c6c185bee49034bcb378a49dc2b5dff0be90ff6616d31d64febab05d"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "downcast-rs"
@@ -1624,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "idle-hue"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "arboard",

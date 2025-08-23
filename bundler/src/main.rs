@@ -1,9 +1,31 @@
+use clap::Parser;
+use dotenv::dotenv;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+#[derive(Parser)]
+#[command(name = "bundler")]
+#[command(about = "Bundle and optionally sign/upload idle-hue applications")]
+struct Args {
+    /// Skip uploading to version server
+    #[arg(long)]
+    skip_upload: bool,
+    /// Upload to production server
+    #[arg(long)]
+    upload_prod: bool,
+}
+
+const VERSION_SERVER_PROD: &str = "https://apps.cyypher.com";
+const VERSION_SERVER_DEV: &str = "https://dev.cyypher.com";
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    // Load .env file
+    dotenv().unwrap();
+
     let project_root = std::env::current_dir()?;
     println!("Project root: {}", project_root.display());
 
@@ -15,17 +37,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     build_all_targets(&project_root)?;
 
     // Create zip files in target directory
-    let zip_paths = create_zip_files(&project_root)?;
+    let mut zip_paths = create_zip_files(&project_root)?;
 
-    // Upload using CLI if environment variables are set
-    if let (Ok(server_url), Ok(api_key)) = (
-        env::var("VERSION_SERVER_URL"),
-        env::var("VERSION_SERVER_API_KEY"),
+    // Sign and notarize macOS apps if signing credentials are available
+    if let (Ok(_), Ok(_), Ok(_)) = (
+        env::var("APPLE_TEAM_ID"),
+        env::var("APPLE_ID"),
+        env::var("APPLE_APP_SPECIFIC_PASSWORD"),
     ) {
-        println!("Uploading to version server...");
-        upload_to_server(&project_root, &version, &zip_paths, &server_url, &api_key)?;
+        println!("Signing credentials found, processing macOS apps...");
+        sign_and_notarize_macos_apps(&project_root, &mut zip_paths)?;
     } else {
-        println!("Skipping upload - VERSION_SERVER_URL or VERSION_SERVER_API_KEY not set");
+        println!("Skipping code signing - Apple credentials not set in .env");
+    }
+
+    // Upload using CLI if environment variables are set and not skipped
+    if args.skip_upload {
+        println!("Skipping upload - --skip-upload flag provided");
+        println!("Created zip files:");
+        for (platform, path) in &zip_paths {
+            println!("  {}: {}", platform, path.display());
+        }
+    } else if let Ok(api_key) = env::var("VERSION_SERVER_API_KEY") {
+        println!("Uploading to version server...");
+        upload_to_server(
+            &project_root,
+            &version,
+            &zip_paths,
+            if args.upload_prod {
+                VERSION_SERVER_PROD
+            } else {
+                VERSION_SERVER_DEV
+            },
+            &api_key,
+        )?;
+    } else {
+        println!("Skipping upload - VERSION_SERVER_API_KEY not set");
         println!("Created zip files:");
         for (platform, path) in &zip_paths {
             println!("  {}: {}", platform, path.display());
@@ -273,5 +320,214 @@ fn upload_to_server(
     }
 
     println!("Successfully uploaded version {version} to server");
+    Ok(())
+}
+
+fn sign_and_notarize_macos_apps(
+    project_root: &std::path::Path,
+    zip_paths: &mut [(String, PathBuf)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let team_id = env::var("APPLE_TEAM_ID")?;
+    let apple_id = env::var("APPLE_ID")?;
+    let app_password = env::var("APPLE_APP_SPECIFIC_PASSWORD")?;
+
+    // Get signing identity
+    let identity_output = Command::new("security")
+        .args(["find-identity", "-v", "-p", "codesigning"])
+        .output()?;
+
+    if !identity_output.status.success() {
+        return Err("Failed to find code signing identities".into());
+    }
+
+    let identity_str = String::from_utf8_lossy(&identity_output.stdout);
+    let identity = identity_str
+        .lines()
+        .find(|line| line.contains("Developer ID Application"))
+        .and_then(|line| {
+            // Extract text between quotes
+            let start = line.find('"')?;
+            let end = line.rfind('"')?;
+            if start < end {
+                Some(&line[start + 1..end])
+            } else {
+                None
+            }
+        })
+        .ok_or("No Developer ID Application certificate found")?;
+
+    println!("Using signing identity: {identity}");
+
+    let target_dir = project_root.join("target");
+
+    // Process ARM64 macOS bundle
+    let arm_bundle_path = target_dir.join("release/bundle/osx/idle-hue.app");
+    if arm_bundle_path.exists() {
+        println!("Signing ARM64 macOS app...");
+        sign_and_notarize_app(
+            &arm_bundle_path,
+            identity,
+            &team_id,
+            &apple_id,
+            &app_password,
+        )?;
+
+        // Re-create zip with signed app
+        let arm_zip_path = target_dir.join("idle-hue-macos-arm.zip");
+        if arm_zip_path.exists() {
+            fs::remove_file(&arm_zip_path)?;
+        }
+
+        let zip_status = Command::new("zip")
+            .args(["-r", "idle-hue-macos-arm.zip", "idle-hue.app"])
+            .current_dir(arm_bundle_path.parent().unwrap())
+            .status()?;
+
+        if !zip_status.success() {
+            return Err("Failed to create signed ARM64 zip".into());
+        }
+
+        let zip_src = arm_bundle_path
+            .parent()
+            .unwrap()
+            .join("idle-hue-macos-arm.zip");
+        if zip_src.exists() {
+            fs::rename(&zip_src, &arm_zip_path)?;
+            // Update zip_paths with signed version
+            if let Some(entry) = zip_paths
+                .iter_mut()
+                .find(|(platform, _)| platform == "macos-arm")
+            {
+                entry.1 = arm_zip_path;
+            }
+        }
+    }
+
+    // Process Intel macOS bundle
+    let intel_bundle_path = target_dir.join("x86_64-apple-darwin/release/bundle/osx/idle-hue.app");
+    if intel_bundle_path.exists() {
+        println!("Signing Intel macOS app...");
+        sign_and_notarize_app(
+            &intel_bundle_path,
+            identity,
+            &team_id,
+            &apple_id,
+            &app_password,
+        )?;
+
+        // Re-create zip with signed app
+        let intel_zip_path = target_dir.join("idle-hue-macos-intel.zip");
+        if intel_zip_path.exists() {
+            fs::remove_file(&intel_zip_path)?;
+        }
+
+        let zip_status = Command::new("zip")
+            .args(["-r", "idle-hue-macos-intel.zip", "idle-hue.app"])
+            .current_dir(intel_bundle_path.parent().unwrap())
+            .status()?;
+
+        if !zip_status.success() {
+            return Err("Failed to create signed Intel zip".into());
+        }
+
+        let zip_src = intel_bundle_path
+            .parent()
+            .unwrap()
+            .join("idle-hue-macos-intel.zip");
+        if zip_src.exists() {
+            fs::rename(&zip_src, &intel_zip_path)?;
+            // Update zip_paths with signed version
+            if let Some(entry) = zip_paths
+                .iter_mut()
+                .find(|(platform, _)| platform == "macos-intel")
+            {
+                entry.1 = intel_zip_path;
+            }
+        }
+    }
+
+    println!("macOS app signing and notarization completed!");
+    Ok(())
+}
+
+fn sign_and_notarize_app(
+    app_path: &std::path::Path,
+    identity: &str,
+    team_id: &str,
+    apple_id: &str,
+    app_password: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Sign the app
+    println!("Code signing: {}", app_path.display());
+    let sign_status = Command::new("codesign")
+        .args([
+            "--timestamp",
+            "--options",
+            "runtime",
+            "--sign",
+            identity,
+            &app_path.to_string_lossy(),
+        ])
+        .status()?;
+
+    if !sign_status.success() {
+        return Err(format!("Failed to code sign {}", app_path.display()).into());
+    }
+
+    // Create temporary zip for notarization
+    let temp_zip = app_path.with_extension("temp.zip");
+    let zip_status = Command::new("zip")
+        .args([
+            "-r",
+            &temp_zip.to_string_lossy(),
+            &app_path.file_name().unwrap().to_string_lossy(),
+        ])
+        .current_dir(app_path.parent().unwrap())
+        .status()?;
+
+    if !zip_status.success() {
+        return Err("Failed to create temporary zip for notarization".into());
+    }
+
+    // Submit for notarization
+    println!("Submitting for notarization...");
+    let notary_status = Command::new("xcrun")
+        .args([
+            "notarytool",
+            "submit",
+            "--wait",
+            "--no-progress",
+            "-f",
+            "json",
+            "--team-id",
+            team_id,
+            "--apple-id",
+            apple_id,
+            "--password",
+            app_password,
+            &temp_zip.to_string_lossy(),
+        ])
+        .status()?;
+
+    // Clean up temp zip
+    if temp_zip.exists() {
+        fs::remove_file(&temp_zip)?;
+    }
+
+    if !notary_status.success() {
+        return Err("Notarization failed".into());
+    }
+
+    // Staple the notarization
+    println!("Stapling notarization...");
+    let staple_status = Command::new("xcrun")
+        .args(["stapler", "staple", &app_path.to_string_lossy()])
+        .status()?;
+
+    if !staple_status.success() {
+        println!("Warning: Failed to staple notarization (this is okay for some apps)");
+    }
+
+    println!("Successfully signed and notarized: {}", app_path.display());
     Ok(())
 }
