@@ -12,7 +12,7 @@ bucket_name = "version-server-r2"
 [[d1_databases]]
 binding = "version-server-d1"
 database_name = "version-server-d1"
-database_id = "1f486ad5-0dcb-42bc-b97c-792551d4d067"
+database_id = "a6662d99-4987-485b-a477-a31a515d641f"
 migrations_dir = "migrations"
 
 [vars]

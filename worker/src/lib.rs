@@ -6,8 +6,8 @@ struct AppVersion {
     id: Option<i64>,
     app_name: String,
     version: String,
+    platform: String,
     timestamp: String,
-    platforms: String,
     created_at: Option<String>,
     updated_at: Option<String>,
 }
@@ -143,21 +143,19 @@ async fn upload(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     }
 
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let platforms_json = try_or_500!(
-        serde_json::to_string(&uploaded_platforms),
-        "Failed to serialize platforms"
-    );
 
-    let stmt = try_or_500!(db
-        .prepare("INSERT OR REPLACE INTO app_versions (app_name, version, timestamp, platforms) VALUES (?1, ?2, ?3, ?4)")
-        .bind(&[
-            app_name.into(),
-            version.clone().into(),
-            timestamp.into(),
-            platforms_json.into(),
-        ]), "Failed to prepare database statement");
+    for platform in &uploaded_platforms {
+        let stmt = try_or_500!(db
+            .prepare("INSERT OR REPLACE INTO app_versions (app_name, version, platform, timestamp) VALUES (?1, ?2, ?3, ?4)")
+            .bind(&[
+                app_name.into(),
+                version.clone().into(),
+                platform.into(),
+                timestamp.clone().into(),
+            ]), "Failed to prepare database statement");
 
-    try_or_500!(stmt.run().await, "Failed to execute database query");
+        try_or_500!(stmt.run().await, "Failed to execute database query");
+    }
 
     Response::from_json(&UploadResponse {
         success: true,
@@ -182,25 +180,27 @@ async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response>
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
 
     let stmt = try_or_500!(db
-        .prepare("SELECT app_name, version, timestamp, platforms, created_at FROM app_versions WHERE app_name = ?1 ORDER BY created_at DESC, id DESC")
+        .prepare("SELECT version, timestamp, GROUP_CONCAT(platform) as platforms, MIN(created_at) as created_at FROM app_versions WHERE app_name = ?1 GROUP BY version, timestamp ORDER BY created_at DESC")
         .bind(&[app_name.into()]), "Failed to prepare database statement");
 
     let result = try_or_500!(stmt.all().await, "Failed to execute database query");
-    let app_versions = try_or_500!(
-        result.results::<AppVersion>(),
-        "Failed to parse database results"
-    );
 
-    let versions: Vec<VersionResponse> = app_versions
+    let versions: Vec<VersionResponse> = result
+        .results::<serde_json::Value>()
+        .unwrap_or_default()
         .into_iter()
-        .map(|app_version| {
-            let platforms: Vec<String> =
-                serde_json::from_str(&app_version.platforms).unwrap_or_else(|_| vec![]);
+        .map(|row| {
+            let platforms_str = row["platforms"].as_str().unwrap_or("");
+            let platforms: Vec<String> = if platforms_str.is_empty() {
+                vec![]
+            } else {
+                platforms_str.split(',').map(|s| s.to_string()).collect()
+            };
 
             VersionResponse {
-                app_name: app_version.app_name,
-                version: app_version.version,
-                timestamp: app_version.timestamp,
+                app_name: app_name.to_string(),
+                version: row["version"].as_str().unwrap_or("").to_string(),
+                timestamp: row["timestamp"].as_str().unwrap_or("").to_string(),
                 platforms,
             }
         })
@@ -243,27 +243,21 @@ async fn get_latest_version_for_platform(_req: Request, ctx: RouteContext<()>) -
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
 
     let stmt = try_or_500!(db
-        .prepare("SELECT app_name, version, timestamp, platforms FROM app_versions WHERE app_name = ?1 ORDER BY created_at DESC, id DESC")
-        .bind(&[app_name.into()]), "Failed to prepare database statement");
+        .prepare("SELECT app_name, version, timestamp, platform FROM app_versions WHERE app_name = ?1 AND platform = ?2 ORDER BY created_at DESC, id DESC LIMIT 1")
+        .bind(&[app_name.into(), platform.into()]), "Failed to prepare database statement");
 
-    let result = try_or_500!(stmt.all().await, "Failed to execute database query");
-    let versions = try_or_500!(
-        result.results::<AppVersion>(),
-        "Failed to parse database results"
+    let result = try_or_500!(
+        stmt.first::<AppVersion>(None).await,
+        "Failed to execute database query"
     );
 
-    for app_version in versions {
-        let platforms: Vec<String> =
-            serde_json::from_str(&app_version.platforms).unwrap_or_else(|_| vec![]);
-
-        if platforms.contains(&platform.to_string()) {
-            return Response::from_json(&LatestVersionResponse {
-                app_name: app_version.app_name,
-                platform: platform.to_string(),
-                version: app_version.version,
-                timestamp: app_version.timestamp,
-            });
-        }
+    if let Some(app_version) = result {
+        return Response::from_json(&LatestVersionResponse {
+            app_name: app_version.app_name,
+            platform: app_version.platform,
+            version: app_version.version,
+            timestamp: app_version.timestamp,
+        });
     }
 
     Response::from_json(&ErrorResponse {
@@ -313,33 +307,23 @@ async fn download_version(_req: Request, ctx: RouteContext<()>) -> Result<Respon
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
 
     let stmt = try_or_500!(db
-        .prepare("SELECT app_name, version, timestamp, platforms FROM app_versions WHERE app_name = ?1 AND version = ?2")
-        .bind(&[app_name.into(), version.into()]), "Failed to prepare database statement");
+        .prepare("SELECT app_name, version, timestamp, platform FROM app_versions WHERE app_name = ?1 AND version = ?2 AND platform = ?3")
+        .bind(&[app_name.into(), version.into(), platform.into()]), "Failed to prepare database statement");
 
     let result = try_or_500!(
         stmt.first::<AppVersion>(None).await,
         "Failed to execute database query"
     );
 
-    let app_version = match result {
+    let _app_version = match result {
         Some(v) => v,
         None => {
             return Response::from_json(&ErrorResponse {
-                error: "Version not found".to_string(),
+                error: "Version not found for platform".to_string(),
             })
             .map(|r| r.with_status(404));
         }
     };
-
-    let platforms: Vec<String> =
-        serde_json::from_str(&app_version.platforms).unwrap_or_else(|_| vec![]);
-
-    if !platforms.contains(&platform.to_string()) {
-        return Response::from_json(&ErrorResponse {
-            error: "Platform not available for this version".to_string(),
-        })
-        .map(|r| r.with_status(404));
-    }
 
     let bucket = try_or_500!(ctx.env.bucket(BUCKET_NAME), "Failed to get bucket");
     let file_key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
@@ -403,27 +387,26 @@ async fn delete_version(req: Request, ctx: RouteContext<()>) -> Result<Response>
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
     let bucket = try_or_500!(ctx.env.bucket(BUCKET_NAME), "Failed to get bucket");
 
-    let stmt = try_or_500!(db
-        .prepare("SELECT app_name, version, timestamp, platforms FROM app_versions WHERE app_name = ?1 AND version = ?2")
-        .bind(&[app_name.into(), version.into()]), "Failed to prepare database statement");
-
-    let result = try_or_500!(
-        stmt.first::<AppVersion>(None).await,
-        "Failed to execute database query"
+    let stmt = try_or_500!(
+        db.prepare("SELECT platform FROM app_versions WHERE app_name = ?1 AND version = ?2")
+            .bind(&[app_name.into(), version.into()]),
+        "Failed to prepare database statement"
     );
 
-    let app_version = match result {
-        Some(v) => v,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Version not found".to_string(),
-            })
-            .map(|r| r.with_status(404));
-        }
-    };
+    let result = try_or_500!(stmt.all().await, "Failed to execute database query");
+    let platforms: Vec<String> = result
+        .results::<serde_json::Value>()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|row| row["platform"].as_str().map(|s| s.to_string()))
+        .collect();
 
-    let platforms: Vec<String> =
-        serde_json::from_str(&app_version.platforms).unwrap_or_else(|_| vec![]);
+    if platforms.is_empty() {
+        return Response::from_json(&ErrorResponse {
+            error: "Version not found".to_string(),
+        })
+        .map(|r| r.with_status(404));
+    }
 
     for platform in &platforms {
         let file_key = format!("{app_name}/{version}/{app_name}-{platform}.zip");

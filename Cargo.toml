@@ -1,5 +1,5 @@
 [workspace]
-members = ["idle-hue", "bundler", "worker", "client"]
+members = ["idle-hue", "bundler", "worker", "client", "cli"]
 resolver = "2"
 
 [workspace.dependencies]

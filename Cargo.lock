@@ -265,7 +265,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "backer"
 version = "0.11.1"
-source = "git+https://github.com/cyypherus/backer?branch=tu#2de29867cfbdfa2b60eb6a644ecb1022bc3e0233"
+source = "git+https://github.com/cyypherus/backer?branch=tu#c5ba27b89a49361a29e8ffac865eb06efe89031f"
 
 [[package]]
 name = "backtrace"
@@ -503,6 +503,57 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
+]
+
+[[package]]
+name = "clap"
+version = "4.5.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fc0e74a703892159f5ae7d3aac52c8e6c392f5ae5f359c70b5881d60aaac318"
+dependencies = [
+ "clap_builder",
+ "clap_derive",
+]
+
+[[package]]
+name = "clap_builder"
+version = "4.5.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3e7f4214277f3c7aa526a59dd3fbe306a370daee1f8b7b8c987069cd8e888a8"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.5.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14cb31bb0a7d536caef2639baa7fad459e15c3144efefa6dbd1c84562c4739f6"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "clap_lex"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
+
+[[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "client",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1590,10 +1641,11 @@ dependencies = [
 
 [[package]]
 name = "idle-hue"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "client",
  "color",
  "directories",
  "dirs",
@@ -1601,7 +1653,6 @@ dependencies = [
  "kurbo",
  "log",
  "parley",
- "reqwest",
  "semver",
  "serde",
  "serde_json",
@@ -3400,6 +3451,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "strsim"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
 name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3850,7 +3907,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ui"
 version = "0.1.0"
-source = "git+https://github.com/cyypherus/ui#bd13e213e78338958415bc07fb41cce0e8eb7f5d"
+source = "git+https://github.com/cyypherus/ui#496d25c2ff43b5dfff705ac04b0169d2a0547c06"
 dependencies = [
  "backer",
  "clipboard-rs",

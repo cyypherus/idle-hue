@@ -1,7 +1,6 @@
-use anyhow::{Context, Result};
-use reqwest::Client;
+use anyhow::Result;
+use client::{VersionServerClient, VersionServerError};
 use semver::Version;
-use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -11,9 +10,8 @@ use tokio::io::AsyncWriteExt;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-const GITHUB_API_URL: &str = "https://api.github.com";
-const REPO_OWNER: &str = "cyypherus";
-const REPO_NAME: &str = "idle-hue";
+const VERSION_SERVER_URL: &str = "https://version-server.ejjonny.workers.dev";
+const APP_NAME: &str = "idle-hue";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStatus {
@@ -27,25 +25,10 @@ pub enum UpdateStatus {
     Error(String),
 }
 
-#[derive(Debug, Deserialize)]
-struct GitHubRelease {
-    tag_name: String,
-    name: String,
-    assets: Vec<GitHubAsset>,
-    prerelease: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct GitHubAsset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
-}
-
 #[derive(Clone)]
 pub struct AutoUpdater {
     current_version: Version,
-    client: Client,
+    client: VersionServerClient,
 }
 
 impl AutoUpdater {
@@ -53,9 +36,11 @@ impl AutoUpdater {
         let current_version =
             Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(|_| Version::new(0, 1, 0));
 
+        let client = VersionServerClient::new(VERSION_SERVER_URL);
+
         Self {
             current_version,
-            client: Client::new(),
+            client,
         }
     }
 
@@ -69,27 +54,27 @@ impl AutoUpdater {
         Fut: std::future::Future<Output = ()> + Send,
     {
         if let Some(callback) = status_callback {
-            callback(UpdateStatus::Checking).await;
-        }
-        let release = self
-            .get_release_by_version(&version)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Release not found for version {}", version))?;
-
-        let asset = self.find_asset_for_platform(&release.assets)?;
-
-        let temp_dir = TempDir::new()?;
-        let download_path = temp_dir.path().join(&asset.name);
-
-        if let Some(callback) = status_callback {
             callback(UpdateStatus::Downloading {
                 version: version.clone(),
             })
             .await;
         }
 
-        self.download_file(&asset.browser_download_url, &download_path)
-            .await?;
+        let platform = self.get_platform_string();
+        let version_str = version.to_string();
+
+        let download_data = self
+            .client
+            .download_version(APP_NAME, &platform, &version_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to download version: {}", e))?;
+
+        let temp_dir = TempDir::new()?;
+        let download_path = temp_dir.path().join(format!("{APP_NAME}-{platform}.zip"));
+
+        let mut file = fs::File::create(&download_path).await?;
+        file.write_all(&download_data).await?;
+        file.flush().await?;
 
         if let Some(callback) = status_callback {
             callback(UpdateStatus::Installing {
@@ -108,83 +93,18 @@ impl AutoUpdater {
         Ok(())
     }
 
-    async fn get_latest_release(&self) -> Result<GitHubRelease> {
-        let url = format!("{GITHUB_API_URL}/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest");
-
-        let response = self
-            .client
-            .get(&url)
-            .header(
-                "User-Agent",
-                format!("{}/{}", REPO_NAME, self.current_version),
-            )
-            .send()
-            .await?;
-
-        let release: GitHubRelease = response.json().await?;
-
-        Ok(release)
-    }
-
-    async fn get_release_by_version(&self, version: &Version) -> Result<Option<GitHubRelease>> {
-        let tag = format!("{version}");
-        let url = format!("{GITHUB_API_URL}/repos/{REPO_OWNER}/{REPO_NAME}/releases/tags/{tag}");
-
-        let response = self
-            .client
-            .get(&url)
-            .header(
-                "User-Agent",
-                format!("{}/{}", REPO_NAME, self.current_version),
-            )
-            .send()
-            .await?;
-
-        if response.status() == 404 {
-            return Ok(None);
-        }
-
-        let release: GitHubRelease = response.json().await?;
-        Ok(Some(release))
-    }
-
-    fn parse_version(&self, tag: &str) -> Result<Version> {
-        let version_str = tag.strip_prefix('v').unwrap_or(tag);
-        Version::parse(version_str).context("Failed to parse version")
-    }
-
-    fn find_asset_for_platform<'a>(&self, assets: &'a [GitHubAsset]) -> Result<&'a GitHubAsset> {
-        let platform_suffix = self.get_platform_suffix();
-
-        assets
-            .iter()
-            .find(|asset| asset.name.contains(&platform_suffix))
-            .ok_or_else(|| anyhow::anyhow!("No asset found for platform: {}", platform_suffix))
-    }
-
-    fn get_platform_suffix(&self) -> String {
+    fn get_platform_string(&self) -> String {
         match env::consts::OS {
-            "windows" => "windows-x86_64-gnu.zip".to_string(),
+            "windows" => "windows-x86_64-gnu".to_string(),
             "macos" => {
                 if cfg!(target_arch = "aarch64") {
-                    "macos-arm.zip".to_string()
+                    "macos-arm".to_string()
                 } else {
-                    "macos-intel.zip".to_string()
+                    "macos-intel".to_string()
                 }
             }
-            os => format!("{os}.zip"),
+            _ => "linux-x86_64-gnu".to_string(),
         }
-    }
-
-    async fn download_file(&self, url: &str, path: &Path) -> Result<()> {
-        let response = self.client.get(url).send().await?;
-        let bytes = response.bytes().await?;
-
-        let mut file = fs::File::create(path).await?;
-        file.write_all(&bytes).await?;
-        file.flush().await?;
-
-        Ok(())
     }
 
     async fn install_update(&self, zip_path: &Path) -> Result<()> {
@@ -194,7 +114,7 @@ impl AutoUpdater {
         #[cfg(target_os = "macos")]
         return self.install_macos(zip_path).await;
 
-        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         Err(anyhow::anyhow!("Unsupported OS: {}", env::consts::OS))
     }
 
@@ -233,7 +153,7 @@ impl AutoUpdater {
         let new_app_bundle = temp_dir.path().join("idle-hue.app");
 
         let output = tokio::process::Command::new("rsync")
-            .args(&["-av", "--delete"])
+            .args(["-av", "--delete"])
             .arg(&new_app_bundle)
             .arg(app_bundle.parent().unwrap())
             .output()
@@ -312,7 +232,6 @@ impl AutoUpdater {
 
         #[cfg(target_os = "windows")]
         {
-            let args: Vec<String> = env::args().collect();
             std::process::Command::new(&current_exe)
                 .creation_flags(0x00000008) // DETACHED_PROCESS
                 .spawn()?;
@@ -336,21 +255,45 @@ impl AutoUpdater {
         F: Fn(UpdateStatus) -> Fut + Send + Sync + Clone,
         Fut: std::future::Future<Output = ()> + Send,
     {
-        let release = match self.get_latest_release().await {
+        let platform = self.get_platform_string();
+
+        let latest_version = match self
+            .client
+            .get_latest_version_for_platform(APP_NAME, &platform)
+            .await
+        {
             Err(e) => {
+                let error_msg = match e {
+                    VersionServerError::UnsupportedPlatform(_) => {
+                        format!("Platform {platform} not supported")
+                    }
+                    _ => e.to_string(),
+                };
                 if let Some(ref callback) = status_callback {
-                    callback(UpdateStatus::Error(e.to_string())).await;
+                    callback(UpdateStatus::Error(error_msg)).await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     callback(UpdateStatus::Idle).await;
                 }
                 return;
             }
-            Ok(release) => release,
+            Ok(None) => {
+                if let Some(ref callback) = status_callback {
+                    callback(UpdateStatus::UpToDate {
+                        version: self.current_version.clone(),
+                    })
+                    .await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    callback(UpdateStatus::Idle).await;
+                }
+                return;
+            }
+            Ok(Some(response)) => response,
         };
-        let latest = match self.parse_version(&release.tag_name) {
+
+        let latest = match Version::parse(&latest_version.version) {
             Err(e) => {
                 if let Some(ref callback) = status_callback {
-                    callback(UpdateStatus::Error(e.to_string())).await;
+                    callback(UpdateStatus::Error(format!("Invalid version format: {e}"))).await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     callback(UpdateStatus::Idle).await;
                 }
@@ -359,14 +302,14 @@ impl AutoUpdater {
             Ok(latest) => latest,
         };
 
-        let true = latest > self.current_version else {
+        if latest <= self.current_version {
             if let Some(ref callback) = status_callback {
                 callback(UpdateStatus::UpToDate { version: latest }).await;
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 callback(UpdateStatus::Idle).await;
             }
             return;
-        };
+        }
 
         match self
             .download_and_install_update_with_callback(latest.clone(), &status_callback)
