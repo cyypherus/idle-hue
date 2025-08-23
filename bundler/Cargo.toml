@@ -1,0 +1,11 @@
+[package]
+name = "bundler"
+version = "0.2.0"
+edition = "2021"
+
+[features]
+prod = []
+
+[[bin]]
+name = "bundler"
+path = "src/main.rs"

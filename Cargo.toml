@@ -1,22 +1,18 @@
-[package]
-name = "idle-hue"
-version = "0.1.0"
-edition = "2024"
-default-run = "idle-hue"
+[workspace]
+members = [
+    "idle-hue",
+    "bundler",
+    "cli",
+    "version-api",
+    "version-api-client",
+    "version-api-models",
+]
+resolver = "2"
 
-[dependencies]
-ui = { git = "https://github.com/cyypherus/ui" }
+[workspace.dependencies]
 # ui = { path = "../ui" }
-arboard = "3.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.43.0", features = ["fs"] }
-parley = "0.5.0"
-color = "0.3.1"
-kurbo = "0.11.3"
-directories = "5.0"
-dark-light = "1.1"
-
-[package.metadata.bundle.bin.idle-hue]
-name = "idle-hue"
-identifier = "cyy.apps.idle-hue"
+tokio = { version = "1.43.0", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
