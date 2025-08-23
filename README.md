@@ -20,8 +20,8 @@
 
 <div align="center">
   <p>
-    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-arm/0.4.6">Download for macOS (Apple Silicon)</a></strong> •
-    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-intel/0.4.6">Download for macOS (Intel)</a></strong> •
-    <strong><a href="https://apps.cyypher.com/idle-hue/download/windows-x86_64-gnu/0.4.6">Download for Windows (x86_64-gnu)</a></strong>
+    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-arm/latest">Download for macOS (Apple Silicon)</a></strong> •
+    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-intel/latest">Download for macOS (Intel)</a></strong> •
+    <strong><a href="https://apps.cyypher.com/idle-hue/download/windows-x86_64-gnu/latest">Download for Windows (x86_64-gnu)</a></strong>
   </p>
 </div>

@@ -18,6 +18,42 @@ macro_rules! try_or_500 {
     };
 }
 
+fn make_error_response(status: u16, message: String) -> Response {
+    Response::from_json(&ErrorResponse { error: message })
+        .unwrap()
+        .with_status(status)
+}
+
+fn bad_request(message: impl Into<String>) -> Result<Response> {
+    Response::from_json(&ErrorResponse {
+        error: message.into(),
+    })
+    .map(|r| r.with_status(400))
+}
+
+fn not_found(message: impl Into<String>) -> Result<Response> {
+    Response::from_json(&ErrorResponse {
+        error: message.into(),
+    })
+    .map(|r| r.with_status(404))
+}
+
+fn unauthorized(message: impl Into<String>) -> Response {
+    Response::from_json(&ErrorResponse {
+        error: message.into(),
+    })
+    .unwrap()
+    .with_status(401)
+}
+
+fn internal_error(message: impl Into<String>) -> Response {
+    Response::from_json(&ErrorResponse {
+        error: message.into(),
+    })
+    .unwrap()
+    .with_status(500)
+}
+
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
     let router = Router::new();
@@ -29,6 +65,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
         .post_async("/:app/upload/finish", complete_version_upload)
         .get_async("/:app/versions", list_versions)
         .get_async("/:app/download/:platform/:version", download_version)
+        .get_async("/:app/download/:platform/latest", download_latest_version)
         .delete_async("/:app/delete/:version", delete_version)
         .run(req, env)
         .await
@@ -41,12 +78,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
 
     let app_name = match ctx.param("app") {
         Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("App name parameter is required"),
     };
 
     let url = req.url()?;
@@ -56,12 +88,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
         .map(|(_, value)| value.to_string())
     {
         Some(a) => a,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Action parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("Action parameter is required"),
     };
 
     match action.as_str() {
@@ -72,12 +99,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
                 .map(|(_, value)| value.to_string())
             {
                 Some(v) => v,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "version parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("version parameter is required"),
             };
 
             let platform = match url
@@ -86,12 +108,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
                 .map(|(_, value)| value.to_string())
             {
                 Some(p) => p,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "platform parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("platform parameter is required"),
             };
 
             let key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
@@ -115,12 +132,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
                 .map(|(_, value)| value.to_string())
             {
                 Some(v) => v,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "version parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("version parameter is required"),
             };
 
             let platform = match url
@@ -129,12 +141,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
                 .map(|(_, value)| value.to_string())
             {
                 Some(p) => p,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "platform parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("platform parameter is required"),
             };
 
             let upload_id = match url
@@ -143,12 +150,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
                 .map(|(_, value)| value.to_string())
             {
                 Some(id) => id,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "uploadId parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("uploadId parameter is required"),
             };
 
             let key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
@@ -186,10 +188,7 @@ async fn handle_multipart_post(mut req: Request, ctx: RouteContext<()>) -> Resul
                 etag: object.http_etag(),
             })
         }
-        _ => Response::from_json(&ErrorResponse {
-            error: format!("Unknown action {action} for POST"),
-        })
-        .map(|r| r.with_status(400)),
+        _ => bad_request(format!("Unknown action {action} for POST")).map(|r| r.with_status(400)),
     }
 }
 
@@ -200,12 +199,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
 
     let app_name = match ctx.param("app") {
         Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("App name parameter is required"),
     };
 
     let url = req.url()?;
@@ -215,12 +209,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
         .map(|(_, value)| value.to_string())
     {
         Some(a) => a,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Action parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("Action parameter is required"),
     };
 
     match action.as_str() {
@@ -231,12 +220,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
                 .map(|(_, value)| value.to_string())
             {
                 Some(v) => v,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "version parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("version parameter is required"),
             };
 
             let platform = match url
@@ -245,12 +229,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
                 .map(|(_, value)| value.to_string())
             {
                 Some(p) => p,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "platform parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("platform parameter is required"),
             };
 
             let upload_id = match url
@@ -259,12 +238,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
                 .map(|(_, value)| value.to_string())
             {
                 Some(id) => id,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "uploadId parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("uploadId parameter is required"),
             };
 
             let part_number = match url
@@ -273,12 +247,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
                 .and_then(|(_, value)| value.parse::<u16>().ok())
             {
                 Some(num) => num,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "partNumber parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("partNumber parameter is required"),
             };
 
             let key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
@@ -300,10 +269,7 @@ async fn handle_multipart_put(mut req: Request, ctx: RouteContext<()>) -> Result
                 etag: uploaded_part.etag(),
             })
         }
-        _ => Response::from_json(&ErrorResponse {
-            error: format!("Unknown action {action} for PUT"),
-        })
-        .map(|r| r.with_status(400)),
+        _ => bad_request(format!("Unknown action {action} for PUT")).map(|r| r.with_status(400)),
     }
 }
 
@@ -314,12 +280,7 @@ async fn handle_multipart_delete(_req: Request, ctx: RouteContext<()>) -> Result
 
     let app_name = match ctx.param("app") {
         Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("App name parameter is required"),
     };
 
     let url = _req.url()?;
@@ -329,12 +290,7 @@ async fn handle_multipart_delete(_req: Request, ctx: RouteContext<()>) -> Result
         .map(|(_, value)| value.to_string())
     {
         Some(a) => a,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Action parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("Action parameter is required"),
     };
 
     match action.as_str() {
@@ -345,12 +301,7 @@ async fn handle_multipart_delete(_req: Request, ctx: RouteContext<()>) -> Result
                 .map(|(_, value)| value.to_string())
             {
                 Some(v) => v,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "version parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("version parameter is required"),
             };
 
             let platform = match url
@@ -359,12 +310,7 @@ async fn handle_multipart_delete(_req: Request, ctx: RouteContext<()>) -> Result
                 .map(|(_, value)| value.to_string())
             {
                 Some(p) => p,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "platform parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("platform parameter is required"),
             };
 
             let upload_id = match url
@@ -373,12 +319,7 @@ async fn handle_multipart_delete(_req: Request, ctx: RouteContext<()>) -> Result
                 .map(|(_, value)| value.to_string())
             {
                 Some(id) => id,
-                None => {
-                    return Response::from_json(&ErrorResponse {
-                        error: "uploadId parameter is required".to_string(),
-                    })
-                    .map(|r| r.with_status(400));
-                }
+                None => return bad_request("uploadId parameter is required"),
             };
 
             let key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
@@ -396,10 +337,7 @@ async fn handle_multipart_delete(_req: Request, ctx: RouteContext<()>) -> Result
 
             Ok(Response::empty()?.with_status(204))
         }
-        _ => Response::from_json(&ErrorResponse {
-            error: format!("Unknown action {action} for DELETE"),
-        })
-        .map(|r| r.with_status(400)),
+        _ => bad_request(format!("Unknown action {action} for DELETE")).map(|r| r.with_status(400)),
     }
 }
 
@@ -410,12 +348,7 @@ async fn complete_version_upload(mut req: Request, ctx: RouteContext<()>) -> Res
 
     let app_name = match ctx.param("app") {
         Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("App name parameter is required"),
     };
 
     let request: CompleteVersionRequest =
@@ -445,24 +378,24 @@ async fn complete_version_upload(mut req: Request, ctx: RouteContext<()>) -> Res
     })
 }
 
-async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let app_name = match ctx.param("app") {
-        Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
-    };
+async fn get_versions_for_app(
+    app_name: &str,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<Vec<VersionResponse>, Response> {
+    let db = ctx
+        .env
+        .d1(DB_NAME)
+        .map_err(|e| make_error_response(500, format!("Failed to get database: {e}")))?;
 
-    let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
-
-    let stmt = try_or_500!(db
+    let stmt = db
         .prepare("SELECT version, timestamp, platform, sha256, created_at FROM app_versions WHERE app_name = ?1 ORDER BY created_at DESC")
-        .bind(&[app_name.into()]), "Failed to prepare database statement");
+        .bind(&[app_name.into()])
+        .map_err(|e| make_error_response(500, format!("Failed to prepare database statement: {e}")))?;
 
-    let result = try_or_500!(stmt.all().await, "Failed to execute database query");
+    let result = stmt
+        .all()
+        .await
+        .map_err(|e| make_error_response(500, format!("Failed to execute database query: {e}")))?;
 
     let mut version_map: std::collections::HashMap<String, VersionResponse> =
         std::collections::HashMap::new();
@@ -483,7 +416,6 @@ async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response>
             sha256s: std::collections::HashMap::new(),
         });
 
-        // Use the latest timestamp for this version
         if timestamp > version_response.timestamp {
             version_response.timestamp = timestamp;
         }
@@ -495,6 +427,71 @@ async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response>
     let mut versions: Vec<VersionResponse> = version_map.into_values().collect();
     versions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
+    Ok(versions)
+}
+
+async fn download_file_from_bucket(
+    app_name: &str,
+    version: &str,
+    platform: &str,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<Response, Response> {
+    let bucket = ctx
+        .env
+        .bucket(BUCKET_NAME)
+        .map_err(|e| make_error_response(500, format!("Failed to get bucket: {e}")))?;
+    let file_key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
+
+    let file_obj = bucket
+        .get(&file_key)
+        .execute()
+        .await
+        .map_err(|e| make_error_response(500, format!("Failed to get file from bucket: {e}")))?
+        .ok_or_else(|| make_error_response(404, "File not found".to_string()))?;
+
+    let filename = format!("{app_name}-{platform}-{version}.zip");
+    let headers = Headers::new();
+    headers
+        .set("Content-Type", "application/zip")
+        .map_err(|e| make_error_response(500, format!("Failed to set headers: {e}")))?;
+    headers
+        .set(
+            "Content-Disposition",
+            &format!("attachment; filename=\"{filename}\""),
+        )
+        .map_err(|e| make_error_response(500, format!("Failed to set headers: {e}")))?;
+    headers
+        .set("Cache-Control", "public, max-age=3600")
+        .map_err(|e| make_error_response(500, format!("Failed to set headers: {e}")))?;
+    headers
+        .set("Content-Length", &file_obj.size().to_string())
+        .map_err(|e| make_error_response(500, format!("Failed to set headers: {e}")))?;
+
+    let body = file_obj
+        .body()
+        .ok_or_else(|| make_error_response(500, "Failed to get file body stream".to_string()))?;
+
+    let stream = body
+        .stream()
+        .map_err(|e| make_error_response(500, format!("Failed to get file stream: {e}")))?;
+
+    let response = Response::from_stream(stream)
+        .map_err(|e| make_error_response(500, format!("Failed to create response: {e}")))?;
+
+    Ok(response.with_headers(headers))
+}
+
+async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let app_name = match ctx.param("app") {
+        Some(app) => app,
+        None => return bad_request("App name parameter is required"),
+    };
+
+    let versions = match get_versions_for_app(app_name, &ctx).await {
+        Ok(v) => v,
+        Err(response) => return Ok(response),
+    };
+
     Response::from_json(&serde_json::json!({
         "app_name": app_name,
         "versions": versions
@@ -504,39 +501,21 @@ async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response>
 async fn download_version(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let app_name = match ctx.param("app") {
         Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("App name parameter is required"),
     };
 
     let platform = match ctx.param("platform") {
         Some(p) => p,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Platform parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("Platform parameter is required"),
     };
 
     let version = match ctx.param("version") {
         Some(v) => v,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Version parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("Version parameter is required"),
     };
 
     if !SUPPORTED_PLATFORMS.contains(&platform.as_str()) {
-        return Response::from_json(&ErrorResponse {
-            error: format!("Unsupported platform: {platform}"),
-        })
-        .map(|r| r.with_status(400));
+        return bad_request(format!("Unsupported platform: {platform}"));
     }
 
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
@@ -552,53 +531,13 @@ async fn download_version(_req: Request, ctx: RouteContext<()>) -> Result<Respon
 
     let _app_version = match result {
         Some(v) => v,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Version not found for platform".to_string(),
-            })
-            .map(|r| r.with_status(404));
-        }
+        None => return not_found("Version not found for platform"),
     };
 
-    let bucket = try_or_500!(ctx.env.bucket(BUCKET_NAME), "Failed to get bucket");
-    let file_key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
-
-    let file_obj = match try_or_500!(
-        bucket.get(&file_key).execute().await,
-        "Failed to get file from bucket"
-    ) {
-        Some(obj) => obj,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "File not found".to_string(),
-            })
-            .map(|r| r.with_status(404));
-        }
-    };
-
-    let filename = format!("{app_name}-{platform}-{version}.zip");
-    let headers = Headers::new();
-    headers.set("Content-Type", "application/zip")?;
-    headers.set(
-        "Content-Disposition",
-        &format!("attachment; filename=\"{filename}\""),
-    )?;
-    headers.set("Cache-Control", "public, max-age=3600")?;
-    headers.set("Content-Length", &file_obj.size().to_string())?;
-
-    // Stream the file directly from R2 without loading into memory
-    let body = match file_obj.body() {
-        Some(body) => body,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Failed to get file body stream".to_string(),
-            })
-            .map(|r| r.with_status(500));
-        }
-    };
-
-    let stream = try_or_500!(body.stream(), "Failed to get file stream");
-    Ok(Response::from_stream(stream)?.with_headers(headers))
+    match download_file_from_bucket(app_name, version, platform, &ctx).await {
+        Ok(response) => Ok(response),
+        Err(response) => Ok(response),
+    }
 }
 
 async fn delete_version(req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -608,22 +547,12 @@ async fn delete_version(req: Request, ctx: RouteContext<()>) -> Result<Response>
 
     let app_name = match ctx.param("app") {
         Some(app) => app,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "App name parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("App name parameter is required"),
     };
 
     let version = match ctx.param("version") {
         Some(v) => v,
-        None => {
-            return Response::from_json(&ErrorResponse {
-                error: "Version parameter is required".to_string(),
-            })
-            .map(|r| r.with_status(400));
-        }
+        None => return bad_request("Version parameter is required"),
     };
 
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
@@ -644,10 +573,7 @@ async fn delete_version(req: Request, ctx: RouteContext<()>) -> Result<Response>
         .collect();
 
     if platforms.is_empty() {
-        return Response::from_json(&ErrorResponse {
-            error: "Version not found".to_string(),
-        })
-        .map(|r| r.with_status(404));
+        return not_found("Version not found");
     }
 
     for platform in &platforms {
@@ -671,51 +597,67 @@ async fn delete_version(req: Request, ctx: RouteContext<()>) -> Result<Response>
     })
 }
 
+async fn download_latest_version(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let app_name = match ctx.param("app") {
+        Some(app) => app,
+        None => return bad_request("App name parameter is required"),
+    };
+
+    let platform = match ctx.param("platform") {
+        Some(p) => p,
+        None => return bad_request("Platform parameter is required"),
+    };
+
+    if !SUPPORTED_PLATFORMS.contains(&platform.as_str()) {
+        return bad_request(format!("Unsupported platform: {platform}"));
+    }
+
+    let versions = match get_versions_for_app(app_name, &ctx).await {
+        Ok(v) => v,
+        Err(response) => return Ok(response),
+    };
+
+    let latest_version = match versions
+        .into_iter()
+        .find(|version| version.platforms.contains(&platform.to_string()))
+    {
+        Some(v) => v,
+        None => return not_found("No version found for platform"),
+    };
+
+    match download_file_from_bucket(app_name, &latest_version.version, platform, &ctx).await {
+        Ok(response) => Ok(response),
+        Err(response) => Ok(response),
+    }
+}
+
 async fn authenticate_request(req: &Request, env: &Env) -> std::result::Result<(), Response> {
-    let api_key = match req.headers().get("Authorization").map_err(|_| {
-        Response::from_json(&ErrorResponse {
-            error: "Failed to read headers".to_string(),
-        })
-        .unwrap()
-        .with_status(500)
-    })? {
+    let api_key = match req
+        .headers()
+        .get("Authorization")
+        .map_err(|_| internal_error("Failed to read headers"))?
+    {
         Some(auth_header) => {
             if let Some(key) = auth_header.strip_prefix("Bearer ") {
                 key.to_string()
             } else {
-                return Err(Response::from_json(&ErrorResponse {
-                    error: "Invalid authorization header format".to_string(),
-                })
-                .unwrap()
-                .with_status(401));
+                return Err(unauthorized("Invalid authorization header format"));
             }
         }
         None => {
-            return Err(Response::from_json(&ErrorResponse {
-                error: "Authorization header required".to_string(),
-            })
-            .unwrap()
-            .with_status(401));
+            return Err(unauthorized("Authorization header required"));
         }
     };
 
     let expected_key = match env.secret("API_KEY") {
         Ok(secret) => secret.to_string(),
         Err(e) => {
-            return Err(Response::from_json(&ErrorResponse {
-                error: format!("Internal server error: Failed to get API key: {e}"),
-            })
-            .unwrap()
-            .with_status(500));
+            return Err(internal_error(format!("Failed to get API key: {e}")));
         }
     };
 
     if api_key != expected_key {
-        return Err(Response::from_json(&ErrorResponse {
-            error: "Invalid API key".to_string(),
-        })
-        .unwrap()
-        .with_status(401));
+        return Err(unauthorized("Invalid API key"));
     }
 
     Ok(())
