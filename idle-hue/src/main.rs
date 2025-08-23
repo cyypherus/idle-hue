@@ -1,6 +1,9 @@
 #![windows_subsystem = "windows"]
 
+mod auto_update;
+
 use arboard::Clipboard;
+use auto_update::{AutoUpdater, UpdateStatus};
 use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
 use directories::ProjectDirs;
 use kurbo::Point;
@@ -40,7 +43,9 @@ struct State {
     mode_picker: ToggleState,
     component_fields: [TextState; 3],
     dark_mode: bool,
+    update_status: Arc<Mutex<auto_update::UpdateStatus>>,
     saved_state: Arc<Mutex<Option<SavedState>>>,
+    update_button: ButtonState,
 }
 
 #[derive(Clone, Debug)]
@@ -117,6 +122,7 @@ impl State {
                     (color.components[2] * 255.0) as u8,
                 );
             }
+
             CurrentColor::Oklch(color) => {
                 let color_text = format!(
                     "oklch({:.2} {:.2} {:.0})",
@@ -321,7 +327,9 @@ impl State {
                 TextState::default(),
             ],
             dark_mode: true,
+            update_status: Arc::new(Mutex::new(auto_update::UpdateStatus::Idle)),
             saved_state: Arc::new(Mutex::new(None)),
+            update_button: ButtonState::default(),
         };
         s.sync_component_fields();
         s.update_text();
@@ -330,20 +338,17 @@ impl State {
 }
 
 fn main() {
-    App::builder(State::default(), || {
+    let state = State::default();
+    env_logger::init();
+
+    App::builder(state, || {
         dynamic(|s: &mut State, _: &mut AppState<State>| {
             stack(vec![
                 rect(id!()).fill(s.theme(Theme::Gray0)).finish(),
                 column_spaced(
                     15.,
                     vec![
-                        row(vec![
-                            space().height(0.),
-                            text(id!(), format!("idle-hue {}", include!("version.txt")))
-                                .fill(s.theme(Theme::Gray70))
-                                .finish(),
-                        ])
-                        .height(10.),
+                        row(vec![space().height(0.), update_button()]),
                         stack(vec![
                             rect(id!())
                                 .fill(s.color.display())
@@ -642,5 +647,80 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                 })
                 .collect(),
         )
+    })
+}
+
+fn update_button<'n>() -> Node<'n, State, AppState<State>> {
+    dynamic(|s: &mut State, _app| {
+        let current_status = s.update_status.blocking_lock().clone();
+
+        let status_text = match current_status {
+            UpdateStatus::Idle => "check for updates".to_string(),
+            UpdateStatus::Checking => "checking for updates...".to_string(),
+            UpdateStatus::Downloading { .. } => "downloading...".to_string(),
+            UpdateStatus::Installing { .. } => "installing...".to_string(),
+            UpdateStatus::Updated { .. } => "restart and install".to_string(),
+            UpdateStatus::UpToDate { .. } => "you're up to date :)".to_string(),
+            UpdateStatus::Error(ref message) => {
+                if message.len() > 40 {
+                    format!("{}...", &message[..37])
+                } else {
+                    message.clone()
+                }
+            }
+        };
+
+        button(id!(), binding!(State, update_button))
+            .corner_rounding(10.)
+            .surface(|_, _| space().height(30.).width(0.))
+            .label(move |s, button_state| {
+                text(
+                    id!(),
+                    if !matches!(current_status, UpdateStatus::Idle) {
+                        status_text.clone()
+                    } else if button_state.hovered {
+                        "check for updates".to_string()
+                    } else {
+                        "idle-hue".to_string()
+                    },
+                )
+                .fill(if button_state.hovered {
+                    s.theme_inverted(Theme::Gray0)
+                } else {
+                    s.theme(Theme::Gray70)
+                })
+                .view()
+                .transition_duration(0.)
+                .finish()
+            })
+            .on_click(move |s: &mut State, app| {
+                let current_status = s.update_status.try_lock().unwrap().clone();
+                if matches!(current_status, auto_update::UpdateStatus::Updated { .. }) {
+                    app.spawn(async move {
+                        if let Err(e) = AutoUpdater::restart_application().await {
+                            log::error!("Failed to restart application: {e}");
+                        }
+                    });
+                } else if !matches!(current_status, auto_update::UpdateStatus::Checking) {
+                    *s.update_status.blocking_lock() = auto_update::UpdateStatus::Checking;
+                    let status = s.update_status.clone();
+                    app.spawn(async move {
+                        let updater = auto_update::AutoUpdater::new();
+                        let status_clone = status.clone();
+                        updater
+                            .check_and_install_updates_with_callback(Some(
+                                move |new_status: UpdateStatus| {
+                                    let status = status_clone.clone();
+                                    async move {
+                                        *status.lock().await = new_status;
+                                    }
+                                },
+                            ))
+                            .await;
+                    });
+                }
+            })
+            .finish()
+            .height(10.)
     })
 }

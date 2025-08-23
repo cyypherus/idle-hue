@@ -1,0 +1,56 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub const SUPPORTED_PLATFORMS: &[&str] = &["macos-arm", "macos-intel", "windows-x86_64-gnu"];
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VersionResponse {
+    pub app_name: String,
+    pub version: String,
+    pub timestamp: String,
+    pub platforms: Vec<String>,
+    pub sha256s: HashMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LatestVersionResponse {
+    pub app_name: String,
+    pub platform: String,
+    pub version: String,
+    pub timestamp: String,
+    pub sha256: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UploadResponse {
+    pub success: bool,
+    pub message: String,
+    pub app_name: String,
+    pub version: String,
+    pub platforms: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ErrorResponse {
+    pub error: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DeleteResponse {
+    pub success: bool,
+    pub message: String,
+    pub app_name: String,
+    pub version: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AppVersion {
+    pub id: Option<i64>,
+    pub app_name: String,
+    pub version: String,
+    pub platform: String,
+    pub timestamp: String,
+    pub sha256: String,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}

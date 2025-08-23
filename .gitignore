@@ -5,3 +5,5 @@ dist/
 traces/
 *.DS_Store
 .cargo/
+.env
+.wrangler/
