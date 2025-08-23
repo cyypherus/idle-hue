@@ -1,10 +1,10 @@
 use anyhow::Result;
 use reqwest::{multipart, Client, Response};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use thiserror::Error;
 
-pub const SUPPORTED_PLATFORMS: &[&str] = &["macos-arm", "macos-intel", "windows-x86_64-gnu"];
+pub use version_api_models::*;
 
 #[derive(Error, Debug)]
 pub enum VersionServerError {
@@ -28,44 +28,6 @@ pub enum VersionServerError {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VersionResponse {
-    pub app_name: String,
-    pub version: String,
-    pub timestamp: String,
-    pub platforms: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct LatestVersionResponse {
-    pub app_name: String,
-    pub platform: String,
-    pub version: String,
-    pub timestamp: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UploadResponse {
-    pub success: bool,
-    pub message: String,
-    pub app_name: String,
-    pub version: String,
-    pub platforms: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct DeleteResponse {
-    pub success: bool,
-    pub message: String,
-    pub app_name: String,
-    pub version: String,
 }
 
 #[derive(Debug, Clone)]

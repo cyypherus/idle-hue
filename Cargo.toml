@@ -1,5 +1,12 @@
 [workspace]
-members = ["idle-hue", "bundler", "worker", "client", "cli"]
+members = [
+    "idle-hue",
+    "bundler",
+    "client",
+    "cli",
+    "version-api",
+    "version-api-models",
+]
 resolver = "2"
 
 [workspace.dependencies]
