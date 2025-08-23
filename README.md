@@ -1,6 +1,6 @@
 <p align="center">
   <a href="#">
-    <img alt="idle-hue" src="PLACEHOLDER_HEADER_IMAGE.png" width="60" />
+    <img width="3616" height="1956" alt="Frame 4" src="https://github.com/user-attachments/assets/512080a9-16ce-4f4e-bf48-f5ed3aaca4fd" />
   </a>
 </p>
 
