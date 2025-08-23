@@ -59,7 +59,14 @@ fn get_app_version(project_root: &std::path::Path) -> Result<String, Box<dyn std
 fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     println!("Building for Apple Silicon (ARM64)...");
     let arm_status = Command::new("cargo")
-        .args(["bundle", "--release", "--package", "idle-hue"])
+        .args([
+            "bundle",
+            "--release",
+            "--bin",
+            "idle-hue",
+            "--package",
+            "idle-hue",
+        ])
         .current_dir(project_root)
         .status()?;
 
@@ -74,6 +81,8 @@ fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::
             "--release",
             "--target",
             "x86_64-apple-darwin",
+            "--bin",
+            "idle-hue",
             "--package",
             "idle-hue",
         ])
@@ -91,6 +100,8 @@ fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::
             "--target",
             "x86_64-pc-windows-gnu",
             "--release",
+            "--bin",
+            "idle-hue",
             "--package",
             "idle-hue",
         ])
