@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub const SUPPORTED_PLATFORMS: &[&str] = &["macos-arm", "macos-intel", "windows-x86_64-gnu"];
 
@@ -8,6 +9,7 @@ pub struct VersionResponse {
     pub version: String,
     pub timestamp: String,
     pub platforms: Vec<String>,
+    pub sha256s: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -16,6 +18,7 @@ pub struct LatestVersionResponse {
     pub platform: String,
     pub version: String,
     pub timestamp: String,
+    pub sha256: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -47,6 +50,7 @@ pub struct AppVersion {
     pub version: String,
     pub platform: String,
     pub timestamp: String,
+    pub sha256: String,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }

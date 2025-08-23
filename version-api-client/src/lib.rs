@@ -1,5 +1,5 @@
 use anyhow::Result;
-use reqwest::{multipart, Client, Response};
+use reqwest::{Client, Response, multipart};
 use serde::Deserialize;
 use std::collections::HashMap;
 use thiserror::Error;

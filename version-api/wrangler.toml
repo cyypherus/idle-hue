@@ -17,7 +17,7 @@ bucket_name = "version-server-r2"
 [[d1_databases]]
 binding = "version-server-d1"
 database_name = "version-server-d1"
-database_id = "a6662d99-4987-485b-a477-a31a515d641f"
+database_id = "4ecd1cfa-2e13-4865-98c3-2eefc40f580c"
 migrations_dir = "migrations"
 
 # Production environment
@@ -35,5 +35,5 @@ bucket_name = "version-server-r2-prod"
 [[env.production.d1_databases]]
 binding = "version-server-d1"
 database_name = "version-server-d1-prod"
-database_id = "edefe691-0911-4f79-b64f-8ff8eb56c789"
+database_id = "a9549ea1-1eb3-420d-8b36-d3d8f3070ad8"
 migrations_dir = "migrations"

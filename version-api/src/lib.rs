@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use version_api_models::*;
 use worker::*;
 const DB_NAME: &str = "version-server-d1";
@@ -75,12 +76,18 @@ async fn upload(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
         let field_name = format!("{app_name}-{platform}.zip");
         if let Some(FormEntry::File(file)) = form_data.get(&field_name) {
             let file_bytes = try_or_500!(file.bytes().await, "Failed to read file");
+
+            // Calculate SHA256 hash
+            let mut hasher = Sha256::new();
+            hasher.update(&file_bytes);
+            let hash = format!("{:x}", hasher.finalize());
+
             let key = format!("{app_name}/{version}/{app_name}-{platform}.zip");
             try_or_500!(
                 bucket.put(&key, file_bytes).execute().await,
                 "Failed to upload file"
             );
-            uploaded_platforms.push(platform.to_string());
+            uploaded_platforms.push((platform.to_string(), hash));
         }
     }
 
@@ -93,14 +100,15 @@ async fn upload(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
 
     let timestamp = chrono::Utc::now().to_rfc3339();
 
-    for platform in &uploaded_platforms {
+    for (platform, sha256) in &uploaded_platforms {
         let stmt = try_or_500!(db
-            .prepare("INSERT OR REPLACE INTO app_versions (app_name, version, platform, timestamp) VALUES (?1, ?2, ?3, ?4)")
+            .prepare("INSERT OR REPLACE INTO app_versions (app_name, version, platform, timestamp, sha256) VALUES (?1, ?2, ?3, ?4, ?5)")
             .bind(&[
                 app_name.into(),
                 version.clone().into(),
                 platform.into(),
                 timestamp.clone().into(),
+                sha256.clone().into(),
             ]), "Failed to prepare database statement");
 
         try_or_500!(stmt.run().await, "Failed to execute database query");
@@ -111,7 +119,10 @@ async fn upload(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
         message: "Version uploaded successfully".to_string(),
         app_name: app_name.to_string(),
         version,
-        platforms: uploaded_platforms,
+        platforms: uploaded_platforms
+            .into_iter()
+            .map(|(platform, _)| platform)
+            .collect(),
     })
 }
 
@@ -129,31 +140,36 @@ async fn list_versions(_req: Request, ctx: RouteContext<()>) -> Result<Response>
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
 
     let stmt = try_or_500!(db
-        .prepare("SELECT version, timestamp, GROUP_CONCAT(platform) as platforms, MIN(created_at) as created_at FROM app_versions WHERE app_name = ?1 GROUP BY version, timestamp ORDER BY created_at DESC")
+        .prepare("SELECT version, timestamp, platform, sha256, created_at FROM app_versions WHERE app_name = ?1 ORDER BY created_at DESC")
         .bind(&[app_name.into()]), "Failed to prepare database statement");
 
     let result = try_or_500!(stmt.all().await, "Failed to execute database query");
 
-    let versions: Vec<VersionResponse> = result
-        .results::<serde_json::Value>()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|row| {
-            let platforms_str = row["platforms"].as_str().unwrap_or("");
-            let platforms: Vec<String> = if platforms_str.is_empty() {
-                vec![]
-            } else {
-                platforms_str.split(',').map(|s| s.to_string()).collect()
-            };
+    let mut version_map: std::collections::HashMap<(String, String), VersionResponse> =
+        std::collections::HashMap::new();
 
-            VersionResponse {
-                app_name: app_name.to_string(),
-                version: row["version"].as_str().unwrap_or("").to_string(),
-                timestamp: row["timestamp"].as_str().unwrap_or("").to_string(),
-                platforms,
-            }
-        })
-        .collect();
+    for row in result.results::<serde_json::Value>().unwrap_or_default() {
+        let version = row["version"].as_str().unwrap_or("").to_string();
+        let timestamp = row["timestamp"].as_str().unwrap_or("").to_string();
+        let platform = row["platform"].as_str().unwrap_or("").to_string();
+        let sha256 = row["sha256"].as_str().unwrap_or("").to_string();
+
+        let key = (version.clone(), timestamp.clone());
+
+        let version_response = version_map.entry(key).or_insert_with(|| VersionResponse {
+            app_name: app_name.to_string(),
+            version: version.clone(),
+            timestamp: timestamp.clone(),
+            platforms: Vec::new(),
+            sha256s: std::collections::HashMap::new(),
+        });
+
+        version_response.platforms.push(platform.clone());
+        version_response.sha256s.insert(platform, sha256);
+    }
+
+    let mut versions: Vec<VersionResponse> = version_map.into_values().collect();
+    versions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     Response::from_json(&serde_json::json!({
         "app_name": app_name,
@@ -192,7 +208,7 @@ async fn get_latest_version_for_platform(_req: Request, ctx: RouteContext<()>) -
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
 
     let stmt = try_or_500!(db
-        .prepare("SELECT app_name, version, timestamp, platform FROM app_versions WHERE app_name = ?1 AND platform = ?2 ORDER BY created_at DESC, id DESC LIMIT 1")
+        .prepare("SELECT app_name, version, timestamp, platform, sha256 FROM app_versions WHERE app_name = ?1 AND platform = ?2 ORDER BY created_at DESC, id DESC LIMIT 1")
         .bind(&[app_name.into(), platform.into()]), "Failed to prepare database statement");
 
     let result = try_or_500!(
@@ -206,6 +222,7 @@ async fn get_latest_version_for_platform(_req: Request, ctx: RouteContext<()>) -
             platform: app_version.platform,
             version: app_version.version,
             timestamp: app_version.timestamp,
+            sha256: app_version.sha256,
         });
     }
 
@@ -256,7 +273,7 @@ async fn download_version(_req: Request, ctx: RouteContext<()>) -> Result<Respon
     let db = try_or_500!(ctx.env.d1(DB_NAME), "Failed to get database");
 
     let stmt = try_or_500!(db
-        .prepare("SELECT app_name, version, timestamp, platform FROM app_versions WHERE app_name = ?1 AND version = ?2 AND platform = ?3")
+        .prepare("SELECT app_name, version, timestamp, platform, sha256 FROM app_versions WHERE app_name = ?1 AND version = ?2 AND platform = ?3")
         .bind(&[app_name.into(), version.into(), platform.into()]), "Failed to prepare database statement");
 
     let result = try_or_500!(

@@ -114,12 +114,12 @@ async fn main() -> Result<()> {
             } else {
                 println!("Versions for app '{app}':");
                 for version in versions {
-                    println!(
-                        "  {} ({}): [{}]",
-                        version.version,
-                        version.timestamp,
-                        version.platforms.join(", ")
-                    );
+                    println!("  {} ({}):", version.version, version.timestamp);
+                    for platform in &version.platforms {
+                        let unknown_hash = "unknown".to_string();
+                        let sha256 = version.sha256s.get(platform).unwrap_or(&unknown_hash);
+                        println!("    {platform}: {sha256}");
+                    }
                 }
             }
         }
@@ -134,6 +134,7 @@ async fn main() -> Result<()> {
                         "Latest version for {}/{}: {} ({})",
                         app, platform, latest.version, latest.timestamp
                     );
+                    println!("  SHA256: {}", latest.sha256);
                 }
                 None => {
                     println!("No versions found for app '{app}' on platform '{platform}'");

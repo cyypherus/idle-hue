@@ -16,6 +16,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
+sha2 = "0.10"
 
 [profile.release]
 opt-level = "s"

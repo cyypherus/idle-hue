@@ -29,6 +29,5 @@ kurbo = "0.11.3"
 name = "idle-hue"
 identifier = "cyy.apps.idle-hue"
 
-
 [profile.release]
 lto = true
