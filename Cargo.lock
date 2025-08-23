@@ -551,27 +551,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "client",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "futures",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "version-api-models",
+ "version-api-client",
 ]
 
 [[package]]
@@ -1642,11 +1624,10 @@ dependencies = [
 
 [[package]]
 name = "idle-hue"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "arboard",
- "client",
  "color",
  "directories",
  "dirs",
@@ -1660,6 +1641,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "ui",
+ "version-api-client",
  "zip",
 ]
 
@@ -4116,6 +4098,24 @@ dependencies = [
  "tokio",
  "version-api-models",
  "worker",
+]
+
+[[package]]
+name = "version-api-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "version-api-models",
 ]
 
 [[package]]

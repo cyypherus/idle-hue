@@ -66,6 +66,8 @@ fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::
             "idle-hue",
             "--package",
             "idle-hue",
+            "--features",
+            "prod",
         ])
         .current_dir(project_root)
         .status()?;
@@ -85,6 +87,8 @@ fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::
             "idle-hue",
             "--package",
             "idle-hue",
+            "--features",
+            "prod",
         ])
         .current_dir(project_root)
         .status()?;
@@ -104,6 +108,8 @@ fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::
             "idle-hue",
             "--package",
             "idle-hue",
+            "--features",
+            "prod",
         ])
         .current_dir(project_root)
         .status()?;

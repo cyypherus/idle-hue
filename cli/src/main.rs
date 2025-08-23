@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use client::{VersionServerClient, SUPPORTED_PLATFORMS};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use version_api_client::{VersionServerClient, SUPPORTED_PLATFORMS};
 
 #[derive(Parser)]
 #[command(name = "version-cli")]

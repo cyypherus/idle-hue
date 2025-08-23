@@ -1,16 +1,20 @@
 use anyhow::Result;
-use client::{VersionServerClient, VersionServerError};
 use semver::Version;
 use std::env;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use version_api_client::{VersionServerClient, VersionServerError};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-const VERSION_SERVER_URL: &str = "https://version-server.ejjonny.workers.dev";
+#[cfg(feature = "prod")]
+const VERSION_SERVER_URL: &str = "https://apps.cyypher.com";
+
+#[cfg(not(feature = "prod"))]
+const VERSION_SERVER_URL: &str = "https://dev.cyypher.com";
 const APP_NAME: &str = "idle-hue";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

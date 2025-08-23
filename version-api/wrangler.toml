@@ -1,9 +1,14 @@
-name = "version-server"
+# Default environment (dev)
+name = "version-server-dev"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
+[[routes]]
+pattern = "dev.cyypher.com"
+custom_domain = true
 
 [[r2_buckets]]
 binding = "version-server-r2"
@@ -15,5 +20,20 @@ database_name = "version-server-d1"
 database_id = "a6662d99-4987-485b-a477-a31a515d641f"
 migrations_dir = "migrations"
 
-[vars]
-WORKER_NAME = "version-server"
+# Production environment
+[env.production]
+name = "version-server-prod"
+
+[[env.production.routes]]
+pattern = "apps.cyypher.com"
+custom_domain = true
+
+[[env.production.r2_buckets]]
+binding = "version-server-r2"
+bucket_name = "version-server-r2-prod"
+
+[[env.production.d1_databases]]
+binding = "version-server-d1"
+database_name = "version-server-d1-prod"
+database_id = "edefe691-0911-4f79-b64f-8ff8eb56c789"
+migrations_dir = "migrations"
