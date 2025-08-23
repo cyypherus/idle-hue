@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use version_api_client::{VersionServerClient, VersionServerError};
+use version_api_client::VersionServerClient;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -261,18 +261,9 @@ impl AutoUpdater {
     {
         let platform = self.get_platform_string();
 
-        let latest_version = match self
-            .client
-            .get_latest_version_for_platform(APP_NAME, &platform)
-            .await
-        {
+        let latest_version = match self.client.get_latest_version(APP_NAME, &platform).await {
             Err(e) => {
-                let error_msg = match e {
-                    VersionServerError::UnsupportedPlatform(_) => {
-                        format!("Platform {platform} not supported")
-                    }
-                    _ => e.to_string(),
-                };
+                let error_msg = e.to_string();
                 if let Some(ref callback) = status_callback {
                     callback(UpdateStatus::Error(error_msg)).await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -280,18 +271,15 @@ impl AutoUpdater {
                 }
                 return;
             }
+            Ok(Some(version_info)) => version_info,
             Ok(None) => {
                 if let Some(ref callback) = status_callback {
-                    callback(UpdateStatus::UpToDate {
-                        version: self.current_version.clone(),
-                    })
-                    .await;
+                    callback(UpdateStatus::Error("No versions available".to_string())).await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     callback(UpdateStatus::Idle).await;
                 }
                 return;
             }
-            Ok(Some(response)) => response,
         };
 
         let latest = match Version::parse(&latest_version.version) {

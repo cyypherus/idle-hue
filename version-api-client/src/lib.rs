@@ -1,5 +1,5 @@
 use anyhow::Result;
-use reqwest::{Client, Response, multipart};
+use reqwest::{Client, Response};
 use serde::Deserialize;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -127,12 +127,11 @@ impl VersionServerClient {
         }
     }
 
-    pub async fn get_latest_version_for_platform<S1: AsRef<str>, S2: AsRef<str>>(
+    pub async fn get_latest_version<S1: AsRef<str>, S2: AsRef<str>>(
         &self,
         app_name: S1,
         platform: S2,
-    ) -> Result<Option<LatestVersionResponse>, VersionServerError> {
-        let app_name = app_name.as_ref();
+    ) -> Result<Option<VersionResponse>, VersionServerError> {
         let platform = platform.as_ref();
 
         if !SUPPORTED_PLATFORMS.contains(&platform) {
@@ -141,23 +140,10 @@ impl VersionServerClient {
             ));
         }
 
-        let response = self
-            .client
-            .get(format!(
-                "{}/{}/latest/{}",
-                self.base_url, app_name, platform
-            ))
-            .send()
-            .await?;
-
-        match response.status().as_u16() {
-            200 => Ok(Some(self.handle_response(response).await?)),
-            404 => Ok(None),
-            _ => Err(self
-                .handle_response::<LatestVersionResponse>(response)
-                .await
-                .unwrap_err()),
-        }
+        let versions = self.list_versions(app_name).await?;
+        Ok(versions
+            .into_iter()
+            .find(|version| version.platforms.contains(&platform.to_string())))
     }
 
     pub async fn download_version<S1: AsRef<str>, S2: AsRef<str>, S3: AsRef<str>>(
@@ -201,32 +187,124 @@ impl VersionServerClient {
         version: S2,
         files: &HashMap<String, Vec<u8>>,
     ) -> Result<UploadResponse, VersionServerError> {
+        const CHUNK_SIZE: usize = 50 * 1024 * 1024; // 50MB chunks
+
         let app_name = app_name.as_ref();
-        let version = version.as_ref().to_string();
-        let mut form = multipart::Form::new().text("version", version);
+        let version = version.as_ref();
+
+        // Always use multipart upload
 
         for (platform, file_content) in files {
             if !SUPPORTED_PLATFORMS.contains(&platform.as_str()) {
                 return Err(VersionServerError::UnsupportedPlatform(platform.clone()));
             }
 
-            let file_name = format!("{app_name}-{platform}.zip");
+            // Calculate SHA256 hash
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(file_content);
+            let hash = format!("{:x}", hasher.finalize());
 
-            form = form.part(
-                file_name.clone(),
-                multipart::Part::bytes(file_content.clone())
-                    .file_name(file_name)
-                    .mime_str("application/zip")?,
-            );
+            // Create multipart upload
+            let create_response = self
+                .add_auth_header(
+                    self.client
+                        .post(format!("{}/{}/upload", self.base_url, app_name))
+                        .query(&[
+                            ("action", "mpu-create"),
+                            ("version", version),
+                            ("platform", platform),
+                        ]),
+                )
+                .send()
+                .await?;
+
+            let create_result: MultipartCreateResponse =
+                self.handle_response(create_response).await?;
+            let upload_id = &create_result.upload_id;
+
+            // Upload parts
+            let chunks: Vec<&[u8]> = file_content.chunks(CHUNK_SIZE).collect();
+            let mut parts = Vec::new();
+
+            for (part_number, chunk) in chunks.iter().enumerate() {
+                let part_num = (part_number + 1) as u16;
+
+                let upload_response = self
+                    .add_auth_header(
+                        self.client
+                            .put(format!("{}/{}/upload", self.base_url, app_name))
+                            .query(&[
+                                ("action", "mpu-uploadpart"),
+                                ("uploadId", upload_id),
+                                ("partNumber", &part_num.to_string()),
+                                ("version", version),
+                                ("platform", platform),
+                            ])
+                            .body(chunk.to_vec()),
+                    )
+                    .send()
+                    .await?;
+
+                let part_result: MultipartPartResponse =
+                    self.handle_response(upload_response).await?;
+                parts.push(serde_json::json!({
+                    "partNumber": part_result.part_number,
+                    "etag": part_result.etag
+                }));
+            }
+
+            // Complete multipart upload
+            let complete_response = self
+                .add_auth_header(
+                    self.client
+                        .post(format!("{}/{}/upload", self.base_url, app_name))
+                        .query(&[
+                            ("action", "mpu-complete"),
+                            ("uploadId", upload_id),
+                            ("version", version),
+                            ("platform", platform),
+                        ])
+                        .json(&serde_json::json!({"parts": parts})),
+                )
+                .send()
+                .await?;
+
+            let _complete_result: MultipartCompleteResponse =
+                self.handle_response(complete_response).await?;
+
+            // Register the completed upload
+            let register_response = self
+                .add_auth_header(
+                    self.client
+                        .post(format!("{}/{}/upload/finish", self.base_url, app_name))
+                        .json(&CompleteVersionRequest {
+                            version: version.to_string(),
+                            platform: platform.clone(),
+                            sha256: hash,
+                        }),
+                )
+                .send()
+                .await?;
+
+            let register_result: CompleteVersionResponse =
+                self.handle_response(register_response).await?;
+
+            if !register_result.success {
+                return Err(VersionServerError::Api {
+                    status: 500,
+                    message: format!("Failed to register version: {}", register_result.message),
+                });
+            }
         }
 
-        let request = self
-            .client
-            .post(format!("{}/{}/upload", self.base_url, app_name))
-            .multipart(form);
-
-        let response = self.add_auth_header(request).send().await?;
-        self.handle_response(response).await
+        Ok(UploadResponse {
+            success: true,
+            message: "Version uploaded successfully".to_string(),
+            app_name: app_name.to_string(),
+            version: version.to_string(),
+            platforms: files.keys().cloned().collect(),
+        })
     }
 
     pub async fn delete_version<S1: AsRef<str>, S2: AsRef<str>>(
@@ -321,7 +399,7 @@ mod tests {
         );
         let result = ctx
             .client
-            .get_latest_version_for_platform(&unique_app, "macos-arm")
+            .get_latest_version(&unique_app, "macos-arm")
             .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -360,12 +438,12 @@ mod tests {
 
         let latest = ctx
             .client
-            .get_latest_version_for_platform(&ctx.test_app, "macos-arm")
+            .get_latest_version(&ctx.test_app, "macos-arm")
             .await
             .unwrap()
             .unwrap();
         assert_eq!(latest.version, ctx.test_version);
-        assert_eq!(latest.platform, "macos-arm");
+        assert!(latest.platforms.contains(&"macos-arm".to_string()));
 
         let download_result = ctx
             .client

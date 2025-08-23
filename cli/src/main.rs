@@ -125,16 +125,15 @@ async fn main() -> Result<()> {
         }
 
         Commands::Latest { app, platform } => {
-            match client
-                .get_latest_version_for_platform(&app, &platform)
-                .await?
-            {
+            match client.get_latest_version(&app, &platform).await? {
                 Some(latest) => {
                     println!(
                         "Latest version for {}/{}: {} ({})",
                         app, platform, latest.version, latest.timestamp
                     );
-                    println!("  SHA256: {}", latest.sha256);
+                    if let Some(sha256) = latest.sha256s.get(&platform) {
+                        println!("  SHA256: {sha256}");
+                    }
                 }
                 None => {
                     println!("No versions found for app '{app}' on platform '{platform}'");

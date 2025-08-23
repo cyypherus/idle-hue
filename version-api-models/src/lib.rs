@@ -54,3 +54,39 @@ pub struct AppVersion {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MultipartCreateResponse {
+    pub key: String,
+    #[serde(rename = "uploadId")]
+    pub upload_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MultipartPartResponse {
+    #[serde(rename = "partNumber")]
+    pub part_number: u16,
+    pub etag: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MultipartCompleteResponse {
+    pub success: bool,
+    pub etag: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CompleteVersionRequest {
+    pub version: String,
+    pub platform: String,
+    pub sha256: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CompleteVersionResponse {
+    pub success: bool,
+    pub message: String,
+    pub app_name: String,
+    pub version: String,
+    pub platform: String,
+}
