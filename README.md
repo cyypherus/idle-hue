@@ -1,6 +1,6 @@
 <p align="center">
   <a href="#">
-    <img width="3616" height="1956" alt="Frame 4" src="https://github.com/user-attachments/assets/512080a9-16ce-4f4e-bf48-f5ed3aaca4fd" />
+    <img width="3616" height="800" alt="Frame 4" src="https://github.com/user-attachments/assets/512080a9-16ce-4f4e-bf48-f5ed3aaca4fd" />
   </a>
 </p>
 
@@ -14,13 +14,14 @@
 
 <br>
 
+<p align="center">
+  Built from scratch with love & rust 🌱
+</p>
+
 <div align="center">
-  <h3>
-    <a href="INSTALL.md">Install</a>
-  </h3>
   <p>
-    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-arm/0.4.6">macOS (Apple Silicon)</a></strong> •
-    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-intel/0.4.6">macOS (Intel)</a></strong> •
-    <strong><a href="https://apps.cyypher.com/idle-hue/download/windows-x86_64-gnu/0.4.6">Windows (x86_64-gnu)</a></strong>
+    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-arm/0.4.6">Download for macOS (Apple Silicon)</a></strong> •
+    <strong><a href="https://apps.cyypher.com/idle-hue/download/macos-intel/0.4.6">Download for macOS (Intel)</a></strong> •
+    <strong><a href="https://apps.cyypher.com/idle-hue/download/windows-x86_64-gnu/0.4.6">Download for Windows (x86_64-gnu)</a></strong>
   </p>
 </div>
