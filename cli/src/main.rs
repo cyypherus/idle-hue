@@ -1,19 +1,19 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use dotenv::dotenv;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use version_api_client::{VersionServerClient, SUPPORTED_PLATFORMS};
+use version_api_models::{VERSION_SERVER_DEV, VERSION_SERVER_PROD};
 
 #[derive(Parser)]
 #[command(name = "version-cli")]
 #[command(about = "CLI tool for interacting with version server")]
 struct Cli {
-    #[arg(short, long, env = "VERSION_SERVER_URL")]
-    url: String,
-
-    #[arg(short, long, env = "VERSION_SERVER_API_KEY")]
-    api_key: Option<String>,
+    #[arg(long, help = "Use production server")]
+    prod: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -99,10 +99,17 @@ fn parse_file_arg(arg: &str) -> Result<(String, PathBuf), String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenv().ok();
     let cli = Cli::parse();
 
-    let mut client = VersionServerClient::new(&cli.url);
-    if let Some(api_key) = cli.api_key {
+    let url = if cli.prod {
+        VERSION_SERVER_PROD
+    } else {
+        VERSION_SERVER_DEV
+    };
+
+    let mut client = VersionServerClient::new(url);
+    if let Ok(api_key) = env::var("VERSION_SERVER_API_KEY") {
         client = client.with_api_key(api_key);
     }
 

@@ -3,6 +3,9 @@ use std::collections::HashMap;
 
 pub const SUPPORTED_PLATFORMS: &[&str] = &["macos-arm", "macos-intel", "windows-x86_64-gnu"];
 
+pub const VERSION_SERVER_PROD: &str = "https://apps.cyypher.com";
+pub const VERSION_SERVER_DEV: &str = "https://dev.cyypher.com";
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VersionResponse {
     pub app_name: String,

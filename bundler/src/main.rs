@@ -4,6 +4,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use version_api_models::{VERSION_SERVER_DEV, VERSION_SERVER_PROD};
 
 #[derive(Parser)]
 #[command(name = "bundler")]
@@ -16,9 +17,6 @@ struct Args {
     #[arg(long)]
     upload_prod: bool,
 }
-
-const VERSION_SERVER_PROD: &str = "https://apps.cyypher.com";
-const VERSION_SERVER_DEV: &str = "https://dev.cyypher.com";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();

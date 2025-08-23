@@ -10,11 +10,6 @@ use version_api_client::VersionServerClient;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-#[cfg(feature = "prod")]
-const VERSION_SERVER_URL: &str = "https://apps.cyypher.com";
-
-#[cfg(not(feature = "prod"))]
-const VERSION_SERVER_URL: &str = "https://dev.cyypher.com";
 const APP_NAME: &str = "idle-hue";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +35,11 @@ impl AutoUpdater {
         let current_version =
             Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(|_| Version::new(0, 1, 0));
 
-        let client = VersionServerClient::new(VERSION_SERVER_URL);
+        #[cfg(feature = "prod")]
+        let client = VersionServerClient::new(version_api_models::VERSION_SERVER_PROD);
+
+        #[cfg(not(feature = "prod"))]
+        let client = VersionServerClient::new(version_api_models::VERSION_SERVER_DEV);
 
         Self {
             current_version,

@@ -369,6 +369,7 @@ version = "0.2.0"
 dependencies = [
  "clap",
  "dotenv",
+ "version-api-models",
 ]
 
 [[package]]
@@ -555,9 +556,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dotenv",
  "serde_json",
  "tokio",
  "version-api-client",
+ "version-api-models",
 ]
 
 [[package]]
@@ -1652,6 +1655,7 @@ dependencies = [
  "tokio",
  "ui",
  "version-api-client",
+ "version-api-models",
  "zip",
 ]
 
