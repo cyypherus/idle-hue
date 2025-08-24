@@ -228,10 +228,12 @@ impl State {
 
     fn paste(&mut self, app: &mut AppState<State>) {
         fn delay_clear_error(error: Arc<Mutex<Option<String>>>, app: &mut AppState<State>) {
+            let redraw = app.redraw_trigger();
             app.spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 let mut current_error = error.lock().await;
                 *current_error = None;
+                redraw.trigger().await;
             });
         }
         if let Ok(mut clipboard) = Clipboard::new() {
@@ -297,7 +299,7 @@ impl State {
             text: self.color_code.clone(),
             dark_mode: Some(self.dark_mode),
         };
-
+        let redraw = app.redraw_trigger();
         app.spawn(async move {
             if let Some(config_path) = Self::get_config_path() {
                 if let Some(parent) = config_path.parent() {
@@ -308,6 +310,7 @@ impl State {
                     let _ = fs::write(config_path, json).await;
                 }
             }
+            redraw.trigger().await;
         });
     }
 
@@ -429,10 +432,12 @@ fn main() {
     })
     .on_start(|state, app| {
         let saved = state.saved_state.clone();
+        let redraw = app.redraw_trigger();
         app.spawn(async move {
             if let Some(saved_state) = State::load_saved_state().await {
                 *saved.lock().await = Some(saved_state);
             }
+            redraw.trigger().await;
         });
     })
     .on_frame(|state, _app| {
@@ -695,6 +700,7 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
             })
             .on_click(move |s: &mut State, app| {
                 let current_status = s.update_status.try_lock().unwrap().clone();
+                let redraw = app.redraw_trigger();
                 if matches!(current_status, auto_update::UpdateStatus::Updated { .. }) {
                     app.spawn(async move {
                         if let Err(e) = AutoUpdater::restart_application().await {
@@ -706,13 +712,14 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
                     let status = s.update_status.clone();
                     app.spawn(async move {
                         let updater = auto_update::AutoUpdater::new();
-                        let status_clone = status.clone();
                         updater
                             .check_and_install_updates_with_callback(Some(
                                 move |new_status: UpdateStatus| {
-                                    let status = status_clone.clone();
+                                    let status = status.clone();
+                                    let redraw = redraw.clone();
                                     async move {
                                         *status.lock().await = new_status;
+                                        redraw.trigger().await;
                                     }
                                 },
                             ))

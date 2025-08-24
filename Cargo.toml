@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "idle-hue",
-    "bundler",
-    "cli",
+    "app-bundler",
     "version-api",
+    "version-api-cli",
     "version-api-client",
     "version-api-models",
 ]
