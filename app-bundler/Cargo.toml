@@ -1,0 +1,12 @@
+[package]
+name = "app-bundler"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+dotenv = "0.15"
+clap = { version = "4.0", features = ["derive"] }
+version-api-models = { path = "../version-api-models" }
+
+[features]
+prod = []
