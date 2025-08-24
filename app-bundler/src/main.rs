@@ -4,7 +4,6 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use version_api_models::{VERSION_SERVER_DEV, VERSION_SERVER_PROD};
 
 #[derive(Parser)]
 #[command(name = "bundler")]
@@ -56,19 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (platform, path) in &zip_paths {
             println!("  {}: {}", platform, path.display());
         }
-    } else if let Ok(api_key) = env::var("VERSION_SERVER_API_KEY") {
+    } else if env::var("VERSION_SERVER_API_KEY").ok().is_some() {
         println!("Uploading to version server...");
-        upload_to_server(
-            &project_root,
-            &version,
-            &zip_paths,
-            if args.upload_prod {
-                VERSION_SERVER_PROD
-            } else {
-                VERSION_SERVER_DEV
-            },
-            &api_key,
-        )?;
+        upload_to_server(&project_root, &version, &zip_paths, args.upload_prod)?;
     } else {
         println!("Skipping upload - VERSION_SERVER_API_KEY not set");
         println!("Created zip files:");
@@ -263,13 +252,12 @@ fn upload_to_server(
     project_root: &std::path::Path,
     version: &str,
     zip_paths: &[(String, PathBuf)],
-    server_url: &str,
-    api_key: &str,
+    prod: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Build the CLI first
     println!("Building CLI...");
     let cli_build_status = Command::new("cargo")
-        .args(["build", "--release", "--package", "cli"])
+        .args(["build", "--release", "--package", "version-api-cli"])
         .current_dir(project_root)
         .status()?;
 
@@ -277,21 +265,21 @@ fn upload_to_server(
         return Err("Failed to build CLI".into());
     }
 
-    let cli_path = project_root.join("target/release/cli");
+    let cli_path = project_root.join("target/release/version-api-cli");
     if !cli_path.exists() {
         return Err("CLI executable not found".into());
     }
 
     // Construct upload command arguments
-    let mut args = vec![
-        "--url".to_string(),
-        server_url.to_string(),
-        "--api-key".to_string(),
-        api_key.to_string(),
-        "upload".to_string(),
-        "idle-hue".to_string(),
-        version.to_string(),
-    ];
+    let mut args: Vec<String> = if prod {
+        vec!["--prod".to_string()]
+    } else {
+        vec![]
+    };
+
+    args.push("upload".to_string());
+    args.push("idle-hue".to_string());
+    args.push(version.to_string());
 
     // Add file arguments
     for (platform, path) in zip_paths {
