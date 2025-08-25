@@ -1624,7 +1624,7 @@ dependencies = [
 
 [[package]]
 name = "idle-hue"
-version = "0.4.7"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3891,7 +3891,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ui"
 version = "0.1.0"
-source = "git+https://github.com/cyypherus/ui#f561ec1da81cfce18e3fa81853786288bdbfd2bf"
+source = "git+https://github.com/cyypherus/ui#fd0ddcf744b21f29d62a10362d01d4eebb7c255d"
 dependencies = [
  "backer",
  "clipboard-rs",
@@ -4515,7 +4515,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

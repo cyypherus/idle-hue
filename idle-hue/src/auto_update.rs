@@ -186,10 +186,10 @@ impl AutoUpdater {
             if file.name().ends_with('/') {
                 std::fs::create_dir_all(&outpath)?;
             } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        std::fs::create_dir_all(p)?;
-                    }
+                if let Some(p) = outpath.parent()
+                    && !p.exists()
+                {
+                    std::fs::create_dir_all(p)?;
                 }
                 let mut outfile = std::fs::File::create(&outpath)?;
                 std::io::copy(&mut file, &mut outfile)?;

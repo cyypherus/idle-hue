@@ -11,8 +11,10 @@ use parley::FontWeight;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs;
 use tokio::sync::Mutex;
+use tokio::time::interval;
 use ui::*;
 
 const GRAY_0_D: Color = Color::from_rgb8(0x00, 0x00, 0x00); // #000000
@@ -221,10 +223,10 @@ impl State {
     }
 
     fn copy(&self) {
-        if let Ok(mut clipboard) = Clipboard::new() {
-            if let Err(e) = clipboard.set_text(self.color_code.clone()) {
-                eprintln!("Failed to copy to clipboard: {e}");
-            }
+        if let Ok(mut clipboard) = Clipboard::new()
+            && let Err(e) = clipboard.set_text(self.color_code.clone())
+        {
+            eprintln!("Failed to copy to clipboard: {e}");
         }
     }
 
@@ -238,15 +240,15 @@ impl State {
                 redraw.trigger().await;
             });
         }
-        if let Ok(mut clipboard) = Clipboard::new() {
-            if let Ok(text) = clipboard.get_text() {
-                let trimmed = text.trim();
-                match self.parse_color(trimmed.to_string()) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        self.error = Arc::new(Mutex::new(Some(e)));
-                        delay_clear_error(self.error.clone(), app);
-                    }
+        if let Ok(mut clipboard) = Clipboard::new()
+            && let Ok(text) = clipboard.get_text()
+        {
+            let trimmed = text.trim();
+            match self.parse_color(trimmed.to_string()) {
+                Ok(_) => (),
+                Err(e) => {
+                    self.error = Arc::new(Mutex::new(Some(e)));
+                    delay_clear_error(self.error.clone(), app);
                 }
             }
         }
@@ -313,6 +315,65 @@ impl State {
                 }
             }
             redraw.trigger().await;
+        });
+    }
+
+    async fn update_button_clicked(
+        update_status: Arc<Mutex<auto_update::UpdateStatus>>,
+        redraw: RedrawTrigger,
+    ) {
+        let mut current_status = update_status.lock().await;
+        if matches!(*current_status, auto_update::UpdateStatus::Updated { .. }) {
+            Self::restart_app().await;
+        } else if !matches!(*current_status, auto_update::UpdateStatus::Checking) {
+            *current_status = auto_update::UpdateStatus::Checking;
+            drop(current_status);
+            redraw.trigger().await;
+            Self::check_for_updates(update_status.clone(), redraw).await
+        }
+    }
+
+    async fn check_for_updates(
+        update_status: Arc<Mutex<auto_update::UpdateStatus>>,
+        redraw: RedrawTrigger,
+    ) {
+        let updater = auto_update::AutoUpdater::new();
+        updater
+            .check_and_install_updates_with_callback(Some(move |new_status: UpdateStatus| {
+                let status = update_status.clone();
+                let redraw = redraw.clone();
+                async move {
+                    *status.lock().await = new_status;
+                    redraw.trigger().await;
+                }
+            }))
+            .await;
+    }
+
+    async fn restart_app() {
+        if let Err(e) = AutoUpdater::restart_application().await {
+            log::error!("Failed to restart application: {e}");
+        }
+    }
+
+    fn on_start(&mut self, app: &AppState<Self>) {
+        let saved = self.saved_state.clone();
+        let redraw = app.redraw_trigger();
+        app.spawn(async move {
+            if let Some(saved_state) = State::load_saved_state().await {
+                *saved.lock().await = Some(saved_state);
+            }
+            redraw.trigger().await;
+        });
+
+        let update_status = self.update_status.clone();
+        let redraw = app.redraw_trigger();
+        app.spawn(async move {
+            let mut interval = interval(Duration::from_secs(60 * 60 * 4)); // Every 4 hours
+            loop {
+                interval.tick().await;
+                Self::update_button_clicked(update_status.clone(), redraw.clone()).await;
+            }
         });
     }
 
@@ -442,14 +503,7 @@ fn main() {
         })
     })
     .on_start(|state, app| {
-        let saved = state.saved_state.clone();
-        let redraw = app.redraw_trigger();
-        app.spawn(async move {
-            if let Some(saved_state) = State::load_saved_state().await {
-                *saved.lock().await = Some(saved_state);
-            }
-            redraw.trigger().await;
-        });
+        state.on_start(app);
     })
     .on_frame(|state, _app| {
         let saved = state.saved_state.blocking_lock().clone();
@@ -677,13 +731,6 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                 })
                 .collect(),
         )
-        // .attach_under(
-        //     rect(id!())
-        //         .fill(s.theme(Theme::Gray30))
-        //         .corner_rounding(10.)
-        //         .view()
-        //         .finish(),
-        // )
     })
 }
 
@@ -732,33 +779,9 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
                 .finish()
             })
             .on_click(move |s: &mut State, app| {
-                let current_status = s.update_status.try_lock().unwrap().clone();
+                let update_status = s.update_status.clone();
                 let redraw = app.redraw_trigger();
-                if matches!(current_status, auto_update::UpdateStatus::Updated { .. }) {
-                    app.spawn(async move {
-                        if let Err(e) = AutoUpdater::restart_application().await {
-                            log::error!("Failed to restart application: {e}");
-                        }
-                    });
-                } else if !matches!(current_status, auto_update::UpdateStatus::Checking) {
-                    *s.update_status.blocking_lock() = auto_update::UpdateStatus::Checking;
-                    let status = s.update_status.clone();
-                    app.spawn(async move {
-                        let updater = auto_update::AutoUpdater::new();
-                        updater
-                            .check_and_install_updates_with_callback(Some(
-                                move |new_status: UpdateStatus| {
-                                    let status = status.clone();
-                                    let redraw = redraw.clone();
-                                    async move {
-                                        *status.lock().await = new_status;
-                                        redraw.trigger().await;
-                                    }
-                                },
-                            ))
-                            .await;
-                    });
-                }
+                app.spawn(async move { State::check_for_updates(update_status, redraw).await });
             })
             .finish()
             .height(10.)
