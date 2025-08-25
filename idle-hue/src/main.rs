@@ -421,7 +421,7 @@ fn main() {
                             rect(id!())
                                 .fill(s.color.display())
                                 .stroke(s.theme(Theme::Gray50), 1.)
-                                .corner_rounding(15.)
+                                .corner_rounding(10.)
                                 .view()
                                 .finish(),
                             text(id!(), s.color_code.clone())
@@ -532,7 +532,7 @@ fn app_button<'n>(
     dynamic(move |s: &mut State, _app| {
         let color = s.theme_inverted(Theme::Gray0);
         button(id!(id), binding.clone())
-            .corner_rounding(10.)
+            .corner_rounding(8.)
             .fill(s.theme(Theme::Gray30))
             .label(move |_, button| {
                 svg(id!(id), icon)
@@ -593,143 +593,145 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
             10.,
             (0usize..3)
                 .map(|i| {
-                    column(vec![
-                        text_field(
-                            id!(i as u64),
-                            Binding::new(
-                                move |s: &State| s.component_fields[i].clone(),
-                                move |s, value| s.component_fields[i] = value,
-                            ),
-                        )
-                        .fill(s.theme_inverted(Theme::Gray0))
-                        .background_fill(Some(s.theme(Theme::Gray30)))
-                        .cursor_fill(s.theme_inverted(Theme::Gray0))
-                        .highlight_fill(contrasting_highlight.with_alpha(0.5))
-                        .background_stroke(s.theme(Theme::Gray70), contrasting_highlight, 1.)
-                        .background_padding(5.)
-                        .on_edit(move |s, app, edit| match edit {
-                            EditInteraction::Update(new) => {
-                                if oklch_mode {
-                                    if let Ok(value) = new.parse::<f32>() {
-                                        s.color.components_mut()[i] = value;
+                    column_spaced(
+                        5.,
+                        vec![
+                            text_field(
+                                id!(i as u64),
+                                Binding::new(
+                                    move |s: &State| s.component_fields[i].clone(),
+                                    move |s, value| s.component_fields[i] = value,
+                                ),
+                            )
+                            .fill(s.theme_inverted(Theme::Gray0))
+                            .background_fill(Some(s.theme(Theme::Gray30)))
+                            .cursor_fill(s.theme_inverted(Theme::Gray0))
+                            .highlight_fill(contrasting_highlight.with_alpha(0.5))
+                            .background_stroke(s.theme(Theme::Gray70), contrasting_highlight, 1.)
+                            .background_padding(5.)
+                            .on_edit(move |s, app, edit| match edit {
+                                EditInteraction::Update(new) => {
+                                    if oklch_mode {
+                                        if let Ok(value) = new.parse::<f32>() {
+                                            s.color.components_mut()[i] = value;
+                                        }
+                                    } else if let Ok(value) = new.parse::<u8>() {
+                                        s.color.components_mut()[i] = value as f32 / 255.;
                                     }
-                                } else if let Ok(value) = new.parse::<u8>() {
-                                    s.color.components_mut()[i] = value as f32 / 255.;
                                 }
-                            }
-                            EditInteraction::End => {
-                                s.clamp_color_components();
-                                s.sync_component_fields();
-                                s.update_text();
-                                s.save_state(app);
-                            }
-                        })
-                        .enter_end_editing()
-                        .esc_end_editing()
-                        .font_size(18)
-                        .finish()
-                        .pad(5.),
-                        row(vec![
-                            rect(id!(i as u64))
-                                .fill({
-                                    let mut color = color.clone();
-                                    let drag = -150.;
-                                    State::update_component(
-                                        &mut color,
-                                        i,
-                                        DragState::Updated {
-                                            start: Point::new(0.0, 0.0),
-                                            current: Point::new(drag, 0.),
-                                            start_global: Point::new(0.0, 0.0),
-                                            current_global: Point::new(drag, 0.),
-                                            delta: Point::new(drag, 0.),
-                                            distance: drag as f32,
-                                        },
-                                    );
-                                    color.display()
-                                })
-                                .corner_rounding(5.)
-                                .finish()
-                                .width(5.)
-                                .height(20.)
-                                .pad(5.),
-                            svg(id!(i as u64), include_str!("assets/arrow-left.svg"))
-                                .fill(s.theme_inverted(Theme::Gray0))
-                                .finish()
-                                .height(30.)
-                                .width(8.),
-                            space().height(0.).width(20.),
-                            svg(id!(i as u64), include_str!("assets/arrow-right.svg"))
-                                .fill(s.theme_inverted(Theme::Gray0))
-                                .finish()
-                                .height(30.)
-                                .width(8.),
-                            rect(id!(i as u64))
-                                .fill({
-                                    let mut color = color.clone();
-                                    let drag = 150.;
-                                    State::update_component(
-                                        &mut color,
-                                        i,
-                                        DragState::Updated {
-                                            start: Point::new(0.0, 0.0),
-                                            current: Point::new(drag, 0.),
-                                            start_global: Point::new(0.0, 0.0),
-                                            current_global: Point::new(drag, 0.),
-                                            delta: Point::new(drag, 0.),
-                                            distance: drag as f32,
-                                        },
-                                    );
-                                    color.display()
-                                })
-                                .corner_rounding(5.)
-                                .finish()
-                                .width(5.)
-                                .height(20.)
-                                .pad(5.),
-                        ])
-                        .attach_under(
-                            rect(id!(i as u64))
-                                .fill(
-                                    if (s.component_hover[i] && s.component_dragging.is_none())
-                                        || s.component_dragging == Some(i)
-                                    {
-                                        s.theme(Theme::Gray50)
-                                    } else {
-                                        s.theme(Theme::Gray30)
-                                    },
-                                )
-                                .stroke(s.theme(Theme::Gray70), 1.)
-                                .corner_rounding(5.)
-                                .view()
-                                .finish(),
-                        )
-                        .attach_over(
-                            rect(id!(i as u64))
-                                .fill(Color::TRANSPARENT)
-                                .view()
-                                .on_hover(move |s: &mut State, _app, hover| {
-                                    s.component_hover[i] = hover;
-                                })
-                                .on_drag(move |s: &mut State, app, drag| {
-                                    State::update_component(&mut s.color, i, drag);
+                                EditInteraction::End => {
+                                    s.clamp_color_components();
                                     s.sync_component_fields();
                                     s.update_text();
-                                    match drag {
-                                        DragState::Began { .. } => {
-                                            s.component_dragging = Some(i);
-                                            app.end_editing();
+                                    s.save_state(app);
+                                }
+                            })
+                            .enter_end_editing()
+                            .esc_end_editing()
+                            .font_size(18)
+                            .finish(),
+                            row(vec![
+                                rect(id!(i as u64))
+                                    .fill({
+                                        let mut color = color.clone();
+                                        let drag = -150.;
+                                        State::update_component(
+                                            &mut color,
+                                            i,
+                                            DragState::Updated {
+                                                start: Point::new(0.0, 0.0),
+                                                current: Point::new(drag, 0.),
+                                                start_global: Point::new(0.0, 0.0),
+                                                current_global: Point::new(drag, 0.),
+                                                delta: Point::new(drag, 0.),
+                                                distance: drag as f32,
+                                            },
+                                        );
+                                        color.display()
+                                    })
+                                    .corner_rounding(5.)
+                                    .finish()
+                                    .width(5.)
+                                    .height(20.)
+                                    .pad(5.),
+                                svg(id!(i as u64), include_str!("assets/arrow-left.svg"))
+                                    .fill(s.theme_inverted(Theme::Gray0))
+                                    .finish()
+                                    .height(30.)
+                                    .width(8.),
+                                space().height(0.).width(20.),
+                                svg(id!(i as u64), include_str!("assets/arrow-right.svg"))
+                                    .fill(s.theme_inverted(Theme::Gray0))
+                                    .finish()
+                                    .height(30.)
+                                    .width(8.),
+                                rect(id!(i as u64))
+                                    .fill({
+                                        let mut color = color.clone();
+                                        let drag = 150.;
+                                        State::update_component(
+                                            &mut color,
+                                            i,
+                                            DragState::Updated {
+                                                start: Point::new(0.0, 0.0),
+                                                current: Point::new(drag, 0.),
+                                                start_global: Point::new(0.0, 0.0),
+                                                current_global: Point::new(drag, 0.),
+                                                delta: Point::new(drag, 0.),
+                                                distance: drag as f32,
+                                            },
+                                        );
+                                        color.display()
+                                    })
+                                    .corner_rounding(5.)
+                                    .finish()
+                                    .width(5.)
+                                    .height(20.)
+                                    .pad(5.),
+                            ])
+                            .attach_under(
+                                rect(id!(i as u64))
+                                    .fill(
+                                        if (s.component_hover[i] && s.component_dragging.is_none())
+                                            || s.component_dragging == Some(i)
+                                        {
+                                            s.theme(Theme::Gray50)
+                                        } else {
+                                            s.theme(Theme::Gray30)
+                                        },
+                                    )
+                                    .stroke(s.theme(Theme::Gray70), 1.)
+                                    .corner_rounding(5.)
+                                    .view()
+                                    .finish(),
+                            )
+                            .attach_over(
+                                rect(id!(i as u64))
+                                    .fill(Color::TRANSPARENT)
+                                    .view()
+                                    .on_hover(move |s: &mut State, _app, hover| {
+                                        s.component_hover[i] = hover;
+                                    })
+                                    .on_drag(move |s: &mut State, app, drag| {
+                                        State::update_component(&mut s.color, i, drag);
+                                        s.sync_component_fields();
+                                        s.update_text();
+                                        match drag {
+                                            DragState::Began { .. } => {
+                                                s.component_dragging = Some(i);
+                                                app.end_editing();
+                                            }
+                                            DragState::Completed { .. } => {
+                                                s.component_dragging = None;
+                                                s.save_state(app);
+                                            }
+                                            _ => (),
                                         }
-                                        DragState::Completed { .. } => {
-                                            s.component_dragging = None;
-                                            s.save_state(app);
-                                        }
-                                        _ => (),
-                                    }
-                                })
-                                .finish(),
-                        ),
-                    ])
+                                    })
+                                    .finish(),
+                            ),
+                        ],
+                    )
                 })
                 .collect(),
         )
@@ -767,7 +769,7 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
                     } else if button_state.hovered {
                         "check for updates".to_string()
                     } else {
-                        "idle-hue".to_string()
+                        format!("idle-hue {}", env!("CARGO_PKG_VERSION"))
                     },
                 )
                 .fill(if button_state.hovered {
