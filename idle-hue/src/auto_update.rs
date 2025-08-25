@@ -124,9 +124,6 @@ impl AutoUpdater {
     #[cfg(target_os = "windows")]
     async fn install_windows(&self, zip_path: &Path) -> Result<()> {
         let current_exe = env::current_exe()?;
-        let install_dir = current_exe
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine install directory"))?;
 
         let temp_dir = TempDir::new()?;
         self.extract_zip(zip_path, temp_dir.path()).await?;
@@ -136,11 +133,10 @@ impl AutoUpdater {
             .ok_or_else(|| anyhow::anyhow!("Cannot determine executable name"))?;
 
         let new_exe = temp_dir.path().join(exe_name);
-        let backup_exe = install_dir.join(format!("{}.backup", exe_name.to_string_lossy()));
-        let target_exe = install_dir.join(exe_name);
 
-        fs::copy(&target_exe, &backup_exe).await?;
-        fs::copy(&new_exe, &target_exe).await?;
+        // Use self-replace to handle all Windows-specific complexity
+        self_replace::self_replace(&new_exe)
+            .map_err(|e| anyhow::anyhow!("Failed to replace executable: {}", e))?;
 
         Ok(())
     }
@@ -259,7 +255,9 @@ impl AutoUpdater {
         Fut: std::future::Future<Output = ()> + Send,
     {
         let platform = self.get_platform_string();
-
+        if let Some(ref callback) = status_callback {
+            callback(UpdateStatus::Checking).await;
+        }
         let latest_version = match self.client.get_latest_version(APP_NAME, &platform).await {
             Err(e) => {
                 let error_msg = e.to_string();

@@ -141,6 +141,7 @@ impl VersionServerClient {
         }
 
         let versions = self.list_versions(app_name).await?;
+        dbg!(&versions);
         Ok(versions
             .into_iter()
             .find(|version| version.platforms.contains(&platform.to_string())))

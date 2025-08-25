@@ -786,7 +786,7 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
             .on_click(move |s: &mut State, app| {
                 let update_status = s.update_status.clone();
                 let redraw = app.redraw_trigger();
-                app.spawn(async move { State::check_for_updates(update_status, redraw).await });
+                app.spawn(async move { State::update_button_clicked(update_status, redraw).await });
             })
             .finish()
             .height(10.)

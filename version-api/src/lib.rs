@@ -425,7 +425,17 @@ async fn get_versions_for_app(
     }
 
     let mut versions: Vec<VersionResponse> = version_map.into_values().collect();
-    versions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    versions.sort_by(|a, b| {
+        match (
+            semver::Version::parse(&a.version),
+            semver::Version::parse(&b.version),
+        ) {
+            (Ok(ver_a), Ok(ver_b)) => ver_b.cmp(&ver_a),
+            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+            (Err(_), Err(_)) => b.timestamp.cmp(&a.timestamp),
+        }
+    });
 
     Ok(versions)
 }

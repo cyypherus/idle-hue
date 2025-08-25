@@ -15,6 +15,12 @@ struct Args {
     /// Upload to production server
     #[arg(long)]
     upload_prod: bool,
+    /// Skip Apple code signing and notarization
+    #[arg(long)]
+    skip_codesign: bool,
+    /// Only build and upload specific platforms (comma-separated: macos-arm,macos-intel,windows)
+    #[arg(long, value_delimiter = ',')]
+    platforms: Option<Vec<String>>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,22 +36,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let version = get_app_version(&project_root)?;
     println!("App version: {version}");
 
-    // Build all targets
-    build_all_targets(&project_root)?;
+    // Determine which platforms to build
+    let platforms = args.platforms.unwrap_or_else(|| {
+        vec![
+            "macos-arm".to_string(),
+            "macos-intel".to_string(),
+            "windows".to_string(),
+        ]
+    });
+
+    // Build selected targets
+    build_targets(&project_root, &platforms, args.upload_prod)?;
 
     // Create zip files in target directory
-    let mut zip_paths = create_zip_files(&project_root)?;
+    let mut zip_paths = create_zip_files(&project_root, &platforms)?;
 
-    // Sign and notarize macOS apps if signing credentials are available
-    if let (Ok(_), Ok(_), Ok(_)) = (
-        env::var("APPLE_TEAM_ID"),
-        env::var("APPLE_ID"),
-        env::var("APPLE_APP_SPECIFIC_PASSWORD"),
-    ) {
-        println!("Signing credentials found, processing macOS apps...");
-        sign_and_notarize_macos_apps(&project_root, &mut zip_paths)?;
+    // Sign and notarize macOS apps if signing credentials are available and not skipped
+    if !args.skip_codesign {
+        if let (Ok(_), Ok(_), Ok(_)) = (
+            env::var("APPLE_TEAM_ID"),
+            env::var("APPLE_ID"),
+            env::var("APPLE_APP_SPECIFIC_PASSWORD"),
+        ) {
+            println!("Signing credentials found, processing macOS apps...");
+            sign_and_notarize_macos_apps(&project_root, &mut zip_paths, &platforms)?;
+        } else {
+            println!("Skipping code signing - Apple credentials not set in .env");
+        }
     } else {
-        println!("Skipping code signing - Apple credentials not set in .env");
+        println!("Skipping code signing - --skip-codesign flag provided");
     }
 
     // Upload using CLI if environment variables are set and not skipped
@@ -90,66 +109,93 @@ fn get_app_version(project_root: &std::path::Path) -> Result<String, Box<dyn std
     Err("Version not found in Cargo.toml".into())
 }
 
-fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Building for Apple Silicon (ARM64)...");
-    let arm_status = Command::new("cargo")
-        .args([
-            "bundle",
-            "--release",
-            "--bin",
-            "idle-hue",
-            "--package",
-            "idle-hue",
-            "--features",
-            "prod",
-        ])
-        .current_dir(project_root)
-        .status()?;
+fn build_targets(
+    project_root: &std::path::Path,
+    platforms: &[String],
+    prod: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for platform in platforms {
+        match platform.as_str() {
+            "macos-arm" => {
+                println!("Building for Apple Silicon (ARM64)...");
+                let mut args = vec![
+                    "bundle",
+                    "--release",
+                    "--bin",
+                    "idle-hue",
+                    "--package",
+                    "idle-hue",
+                ];
+                if prod {
+                    args.push("--features");
+                    args.push("prod");
+                }
+                let arm_status = Command::new("cargo")
+                    .args(args)
+                    .current_dir(project_root)
+                    .status()?;
 
-    if !arm_status.success() {
-        return Err("Failed to build ARM64 bundle".into());
-    }
+                if !arm_status.success() {
+                    return Err("Failed to build ARM64 bundle".into());
+                }
+            }
+            "macos-intel" => {
+                println!("Building for Intel (x86_64)...");
+                let mut args = vec![
+                    "bundle",
+                    "--release",
+                    "--target",
+                    "x86_64-apple-darwin",
+                    "--bin",
+                    "idle-hue",
+                    "--package",
+                    "idle-hue",
+                ];
+                if prod {
+                    args.push("--features");
+                    args.push("prod");
+                }
+                let intel_status = Command::new("cargo")
+                    .args(args)
+                    .current_dir(project_root)
+                    .status()?;
 
-    println!("Building for Intel (x86_64)...");
-    let intel_status = Command::new("cargo")
-        .args([
-            "bundle",
-            "--release",
-            "--target",
-            "x86_64-apple-darwin",
-            "--bin",
-            "idle-hue",
-            "--package",
-            "idle-hue",
-            "--features",
-            "prod",
-        ])
-        .current_dir(project_root)
-        .status()?;
+                if !intel_status.success() {
+                    return Err("Failed to build Intel bundle".into());
+                }
+            }
+            "windows" => {
+                println!("Building for Windows (x86_64)...");
+                let mut args = vec![
+                    "build",
+                    "--target",
+                    "x86_64-pc-windows-gnu",
+                    "--release",
+                    "--bin",
+                    "idle-hue",
+                    "--package",
+                    "idle-hue",
+                ];
+                if prod {
+                    args.push("--features");
+                    args.push("prod");
+                }
+                let windows_status = Command::new("cargo")
+                    .args(args)
+                    .current_dir(project_root)
+                    .status()?;
 
-    if !intel_status.success() {
-        return Err("Failed to build Intel bundle".into());
-    }
-
-    println!("Building for Windows (x86_64)...");
-    let windows_status = Command::new("cargo")
-        .args([
-            "build",
-            "--target",
-            "x86_64-pc-windows-gnu",
-            "--release",
-            "--bin",
-            "idle-hue",
-            "--package",
-            "idle-hue",
-            "--features",
-            "prod",
-        ])
-        .current_dir(project_root)
-        .status()?;
-
-    if !windows_status.success() {
-        return Err("Failed to build Windows executable".into());
+                if !windows_status.success() {
+                    return Err("Failed to build Windows executable".into());
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "Unknown platform: {platform}. Supported: macos-arm, macos-intel, windows"
+                )
+                .into());
+            }
+        }
     }
 
     Ok(())
@@ -157,92 +203,108 @@ fn build_all_targets(project_root: &std::path::Path) -> Result<(), Box<dyn std::
 
 fn create_zip_files(
     project_root: &std::path::Path,
+    platforms: &[String],
 ) -> Result<Vec<(String, PathBuf)>, Box<dyn std::error::Error>> {
     let target_dir = project_root.join("target");
     let mut zip_paths = Vec::new();
 
-    // ARM64 macOS bundle
-    let arm_bundle_path = target_dir.join("release/bundle/osx/idle-hue.app");
-    let arm_zip_path = target_dir.join("idle-hue-macos-arm.zip");
+    for platform in platforms {
+        match platform.as_str() {
+            "macos-arm" => {
+                // ARM64 macOS bundle
+                let arm_bundle_path = target_dir.join("release/bundle/osx/idle-hue.app");
+                let arm_zip_path = target_dir.join("idle-hue-macos-arm.zip");
 
-    if !arm_bundle_path.exists() {
-        return Err(format!("ARM bundle not found at {arm_bundle_path:?}").into());
-    }
+                if !arm_bundle_path.exists() {
+                    return Err(format!("ARM bundle not found at {arm_bundle_path:?}").into());
+                }
 
-    println!("Creating ARM64 zip...");
-    let arm_zip_status = Command::new("zip")
-        .args(["-r", "idle-hue-macos-arm.zip", "idle-hue.app"])
-        .current_dir(arm_bundle_path.parent().unwrap())
-        .status()?;
+                println!("Creating ARM64 zip...");
+                let arm_zip_status = Command::new("zip")
+                    .args(["-r", "idle-hue-macos-arm.zip", "idle-hue.app"])
+                    .current_dir(arm_bundle_path.parent().unwrap())
+                    .status()?;
 
-    if !arm_zip_status.success() {
-        return Err("Failed to create ARM64 zip".into());
-    }
+                if !arm_zip_status.success() {
+                    return Err("Failed to create ARM64 zip".into());
+                }
 
-    // Move to target directory
-    let arm_zip_src = arm_bundle_path
-        .parent()
-        .unwrap()
-        .join("idle-hue-macos-arm.zip");
-    if arm_zip_src.exists() {
-        fs::rename(&arm_zip_src, &arm_zip_path)?;
-        zip_paths.push(("macos-arm".to_string(), arm_zip_path));
-    }
+                // Move to target directory
+                let arm_zip_src = arm_bundle_path
+                    .parent()
+                    .unwrap()
+                    .join("idle-hue-macos-arm.zip");
+                if arm_zip_src.exists() {
+                    fs::rename(&arm_zip_src, &arm_zip_path)?;
+                    zip_paths.push(("macos-arm".to_string(), arm_zip_path));
+                }
+            }
+            "macos-intel" => {
+                // Intel macOS bundle
+                let intel_bundle_path =
+                    target_dir.join("x86_64-apple-darwin/release/bundle/osx/idle-hue.app");
+                let intel_zip_path = target_dir.join("idle-hue-macos-intel.zip");
 
-    // Intel macOS bundle
-    let intel_bundle_path = target_dir.join("x86_64-apple-darwin/release/bundle/osx/idle-hue.app");
-    let intel_zip_path = target_dir.join("idle-hue-macos-intel.zip");
+                if !intel_bundle_path.exists() {
+                    return Err(format!("Intel bundle not found at {intel_bundle_path:?}").into());
+                }
 
-    if !intel_bundle_path.exists() {
-        return Err(format!("Intel bundle not found at {intel_bundle_path:?}").into());
-    }
+                println!("Creating Intel zip...");
+                let intel_zip_status = Command::new("zip")
+                    .args(["-r", "idle-hue-macos-intel.zip", "idle-hue.app"])
+                    .current_dir(intel_bundle_path.parent().unwrap())
+                    .status()?;
 
-    println!("Creating Intel zip...");
-    let intel_zip_status = Command::new("zip")
-        .args(["-r", "idle-hue-macos-intel.zip", "idle-hue.app"])
-        .current_dir(intel_bundle_path.parent().unwrap())
-        .status()?;
+                if !intel_zip_status.success() {
+                    return Err("Failed to create Intel zip".into());
+                }
 
-    if !intel_zip_status.success() {
-        return Err("Failed to create Intel zip".into());
-    }
+                // Move to target directory
+                let intel_zip_src = intel_bundle_path
+                    .parent()
+                    .unwrap()
+                    .join("idle-hue-macos-intel.zip");
+                if intel_zip_src.exists() {
+                    fs::rename(&intel_zip_src, &intel_zip_path)?;
+                    zip_paths.push(("macos-intel".to_string(), intel_zip_path));
+                }
+            }
+            "windows" => {
+                // Windows executable
+                let windows_exe_path =
+                    target_dir.join("x86_64-pc-windows-gnu/release/idle-hue.exe");
+                let windows_zip_path = target_dir.join("idle-hue-windows-x86_64-gnu.zip");
 
-    // Move to target directory
-    let intel_zip_src = intel_bundle_path
-        .parent()
-        .unwrap()
-        .join("idle-hue-macos-intel.zip");
-    if intel_zip_src.exists() {
-        fs::rename(&intel_zip_src, &intel_zip_path)?;
-        zip_paths.push(("macos-intel".to_string(), intel_zip_path));
-    }
+                if !windows_exe_path.exists() {
+                    return Err(
+                        format!("Windows executable not found at {windows_exe_path:?}").into(),
+                    );
+                }
 
-    // Windows executable
-    let windows_exe_path = target_dir.join("x86_64-pc-windows-gnu/release/idle-hue.exe");
-    let windows_zip_path = target_dir.join("idle-hue-windows-x86_64-gnu.zip");
+                println!("Creating Windows zip...");
+                let windows_zip_status = Command::new("zip")
+                    .args(["-j", "idle-hue-windows-x86_64-gnu.zip", "idle-hue.exe"])
+                    .current_dir(windows_exe_path.parent().unwrap())
+                    .status()?;
 
-    if !windows_exe_path.exists() {
-        return Err(format!("Windows executable not found at {windows_exe_path:?}").into());
-    }
+                if !windows_zip_status.success() {
+                    return Err("Failed to create Windows zip".into());
+                }
 
-    println!("Creating Windows zip...");
-    let windows_zip_status = Command::new("zip")
-        .args(["-j", "idle-hue-windows-x86_64-gnu.zip", "idle-hue.exe"])
-        .current_dir(windows_exe_path.parent().unwrap())
-        .status()?;
-
-    if !windows_zip_status.success() {
-        return Err("Failed to create Windows zip".into());
-    }
-
-    // Move to target directory
-    let windows_zip_src = windows_exe_path
-        .parent()
-        .unwrap()
-        .join("idle-hue-windows-x86_64-gnu.zip");
-    if windows_zip_src.exists() {
-        fs::rename(&windows_zip_src, &windows_zip_path)?;
-        zip_paths.push(("windows-x86_64-gnu".to_string(), windows_zip_path));
+                // Move to target directory
+                let windows_zip_src = windows_exe_path
+                    .parent()
+                    .unwrap()
+                    .join("idle-hue-windows-x86_64-gnu.zip");
+                if windows_zip_src.exists() {
+                    fs::rename(&windows_zip_src, &windows_zip_path)?;
+                    zip_paths.push(("windows-x86_64-gnu".to_string(), windows_zip_path));
+                }
+            }
+            _ => {
+                return Err(format!("Unknown platform: {platform}").into());
+            }
+        }
     }
 
     Ok(zip_paths)
@@ -312,6 +374,7 @@ fn upload_to_server(
 fn sign_and_notarize_macos_apps(
     project_root: &std::path::Path,
     zip_paths: &mut [(String, PathBuf)],
+    platforms: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let team_id = env::var("APPLE_TEAM_ID")?;
     let apple_id = env::var("APPLE_ID")?;
@@ -346,88 +409,93 @@ fn sign_and_notarize_macos_apps(
 
     let target_dir = project_root.join("target");
 
-    // Process ARM64 macOS bundle
-    let arm_bundle_path = target_dir.join("release/bundle/osx/idle-hue.app");
-    if arm_bundle_path.exists() {
-        println!("Signing ARM64 macOS app...");
-        sign_and_notarize_app(
-            &arm_bundle_path,
-            identity,
-            &team_id,
-            &apple_id,
-            &app_password,
-        )?;
+    // Process ARM64 macOS bundle only if selected
+    if platforms.contains(&"macos-arm".to_string()) {
+        let arm_bundle_path = target_dir.join("release/bundle/osx/idle-hue.app");
+        if arm_bundle_path.exists() {
+            println!("Signing ARM64 macOS app...");
+            sign_and_notarize_app(
+                &arm_bundle_path,
+                identity,
+                &team_id,
+                &apple_id,
+                &app_password,
+            )?;
 
-        // Re-create zip with signed app
-        let arm_zip_path = target_dir.join("idle-hue-macos-arm.zip");
-        if arm_zip_path.exists() {
-            fs::remove_file(&arm_zip_path)?;
-        }
+            // Re-create zip with signed app
+            let arm_zip_path = target_dir.join("idle-hue-macos-arm.zip");
+            if arm_zip_path.exists() {
+                fs::remove_file(&arm_zip_path)?;
+            }
 
-        let zip_status = Command::new("zip")
-            .args(["-r", "idle-hue-macos-arm.zip", "idle-hue.app"])
-            .current_dir(arm_bundle_path.parent().unwrap())
-            .status()?;
+            let zip_status = Command::new("zip")
+                .args(["-r", "idle-hue-macos-arm.zip", "idle-hue.app"])
+                .current_dir(arm_bundle_path.parent().unwrap())
+                .status()?;
 
-        if !zip_status.success() {
-            return Err("Failed to create signed ARM64 zip".into());
-        }
+            if !zip_status.success() {
+                return Err("Failed to create signed ARM64 zip".into());
+            }
 
-        let zip_src = arm_bundle_path
-            .parent()
-            .unwrap()
-            .join("idle-hue-macos-arm.zip");
-        if zip_src.exists() {
-            fs::rename(&zip_src, &arm_zip_path)?;
-            // Update zip_paths with signed version
-            if let Some(entry) = zip_paths
-                .iter_mut()
-                .find(|(platform, _)| platform == "macos-arm")
-            {
-                entry.1 = arm_zip_path;
+            let zip_src = arm_bundle_path
+                .parent()
+                .unwrap()
+                .join("idle-hue-macos-arm.zip");
+            if zip_src.exists() {
+                fs::rename(&zip_src, &arm_zip_path)?;
+                // Update zip_paths with signed version
+                if let Some(entry) = zip_paths
+                    .iter_mut()
+                    .find(|(platform, _)| platform == "macos-arm")
+                {
+                    entry.1 = arm_zip_path;
+                }
             }
         }
     }
 
-    // Process Intel macOS bundle
-    let intel_bundle_path = target_dir.join("x86_64-apple-darwin/release/bundle/osx/idle-hue.app");
-    if intel_bundle_path.exists() {
-        println!("Signing Intel macOS app...");
-        sign_and_notarize_app(
-            &intel_bundle_path,
-            identity,
-            &team_id,
-            &apple_id,
-            &app_password,
-        )?;
+    // Process Intel macOS bundle only if selected
+    if platforms.contains(&"macos-intel".to_string()) {
+        let intel_bundle_path =
+            target_dir.join("x86_64-apple-darwin/release/bundle/osx/idle-hue.app");
+        if intel_bundle_path.exists() {
+            println!("Signing Intel macOS app...");
+            sign_and_notarize_app(
+                &intel_bundle_path,
+                identity,
+                &team_id,
+                &apple_id,
+                &app_password,
+            )?;
 
-        // Re-create zip with signed app
-        let intel_zip_path = target_dir.join("idle-hue-macos-intel.zip");
-        if intel_zip_path.exists() {
-            fs::remove_file(&intel_zip_path)?;
-        }
+            // Re-create zip with signed app
+            let intel_zip_path = target_dir.join("idle-hue-macos-intel.zip");
+            if intel_zip_path.exists() {
+                fs::remove_file(&intel_zip_path)?;
+            }
 
-        let zip_status = Command::new("zip")
-            .args(["-r", "idle-hue-macos-intel.zip", "idle-hue.app"])
-            .current_dir(intel_bundle_path.parent().unwrap())
-            .status()?;
+            let zip_status = Command::new("zip")
+                .args(["-r", "idle-hue-macos-intel.zip", "idle-hue.app"])
+                .current_dir(intel_bundle_path.parent().unwrap())
+                .status()?;
 
-        if !zip_status.success() {
-            return Err("Failed to create signed Intel zip".into());
-        }
+            if !zip_status.success() {
+                return Err("Failed to create signed Intel zip".into());
+            }
 
-        let zip_src = intel_bundle_path
-            .parent()
-            .unwrap()
-            .join("idle-hue-macos-intel.zip");
-        if zip_src.exists() {
-            fs::rename(&zip_src, &intel_zip_path)?;
-            // Update zip_paths with signed version
-            if let Some(entry) = zip_paths
-                .iter_mut()
-                .find(|(platform, _)| platform == "macos-intel")
-            {
-                entry.1 = intel_zip_path;
+            let zip_src = intel_bundle_path
+                .parent()
+                .unwrap()
+                .join("idle-hue-macos-intel.zip");
+            if zip_src.exists() {
+                fs::rename(&zip_src, &intel_zip_path)?;
+                // Update zip_paths with signed version
+                if let Some(entry) = zip_paths
+                    .iter_mut()
+                    .find(|(platform, _)| platform == "macos-intel")
+                {
+                    entry.1 = intel_zip_path;
+                }
             }
         }
     }
