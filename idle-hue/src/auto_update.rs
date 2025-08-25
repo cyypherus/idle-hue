@@ -136,7 +136,7 @@ impl AutoUpdater {
 
         // Use self-replace to handle all Windows-specific complexity
         self_replace::self_replace(&new_exe).expect("Failed to replace executable");
-        // std::fs::remove_file(&new_exe)?;
+        std::fs::remove_file(&new_exe)?;
 
         Ok(())
     }
