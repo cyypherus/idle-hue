@@ -28,17 +28,7 @@ directories = "6.0.0"
 color = "0.3.1"
 kurbo = "0.11.3"
 
-[build-dependencies]
-winresource = "0.1.23"
-
-# [package.metadata.bundle.bin.idle-hue]
-# name = "idle-hue"
-# identifier = "cyy.apps.idle-hue"
-# icon = ["idle-hue/src/assets/icon.icns"]
-
-[package.metadata.packager]
-before-packaging-command = "cargo build --release -p idle-hue --bin idle-hue --features prod"
-product-name = "?"
-identifier = "com.trs.example"
-resources = ["Cargo.toml", "src", "32x32.png"]
-icons = ["idle-hue/src/assets/Icon1024.png"]
+[package.metadata.bundle.bin.idle-hue]
+name = "idle-hue"
+identifier = "cyy.apps.idle-hue"
+icon = ["idle-hue/src/assets/icon.icns"]
