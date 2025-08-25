@@ -517,6 +517,7 @@ fn main() {
             *state.saved_state.blocking_lock() = None;
         }
     })
+    .title("idle-hue")
     .inner_size(350, 250)
     // .resizable(false)
     .start()
