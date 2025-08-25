@@ -532,7 +532,7 @@ fn app_button<'n>(
     dynamic(move |s: &mut State, _app| {
         let color = s.theme_inverted(Theme::Gray0);
         button(id!(id), binding.clone())
-            .corner_rounding(8.)
+            .corner_rounding(7.)
             .fill(s.theme(Theme::Gray30))
             .label(move |_, button| {
                 svg(id!(id), icon)
