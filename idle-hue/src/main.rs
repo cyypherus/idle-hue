@@ -42,6 +42,8 @@ struct State {
     oklch_mode: bool,
     mode_picker: ToggleState,
     component_fields: [TextState; 3],
+    component_hover: [bool; 3],
+    component_dragging: Option<usize>,
     dark_mode: bool,
     update_status: Arc<Mutex<auto_update::UpdateStatus>>,
     saved_state: Arc<Mutex<Option<SavedState>>>,
@@ -153,24 +155,24 @@ impl State {
         match drag {
             DragState::Began { .. } => (),
             DragState::Updated {
-                delta: Point { y, .. },
+                delta: Point { x, .. },
                 ..
             }
             | DragState::Completed {
-                delta: Point { y, .. },
+                delta: Point { x, .. },
                 ..
             } => {
-                let y = y as f32;
+                let x = -x as f32;
                 match color {
                     CurrentColor::Oklch(color) => match component_index {
                         0 => {
-                            color.components[0] = (color.components[0] - y * 0.001).clamp(0.0, 1.0)
+                            color.components[0] = (color.components[0] - x * 0.001).clamp(0.0, 1.0)
                         }
                         1 => {
-                            color.components[1] = (color.components[1] - y * 0.0005).clamp(0.0, 0.5)
+                            color.components[1] = (color.components[1] - x * 0.0005).clamp(0.0, 0.5)
                         }
                         2 => {
-                            color.components[2] -= y * 0.5;
+                            color.components[2] -= x * 0.5;
                             if color.components[2] < 0.0 {
                                 color.components[2] += 360.0
                             }
@@ -182,7 +184,7 @@ impl State {
                     },
                     CurrentColor::Srgb(color) => {
                         color.components[component_index] =
-                            (color.components[component_index] - y * 0.001).clamp(0.0, 1.0);
+                            (color.components[component_index] - x * 0.001).clamp(0.0, 1.0);
                     }
                 }
             }
@@ -329,6 +331,8 @@ impl State {
                 TextState::default(),
                 TextState::default(),
             ],
+            component_hover: [false; 3],
+            component_dragging: None,
             dark_mode: true,
             update_status: Arc::new(Mutex::new(auto_update::UpdateStatus::Idle)),
             saved_state: Arc::new(Mutex::new(None)),
@@ -349,18 +353,18 @@ fn main() {
             stack(vec![
                 rect(id!()).fill(s.theme(Theme::Gray0)).finish(),
                 column_spaced(
-                    15.,
+                    10.,
                     vec![
                         row(vec![space().height(0.), update_button()]),
                         stack(vec![
                             rect(id!())
                                 .fill(s.color.display())
-                                .stroke(s.theme(Theme::Gray50), 3.)
+                                .stroke(s.theme(Theme::Gray50), 1.)
                                 .corner_rounding(15.)
                                 .view()
                                 .finish(),
                             text(id!(), s.color_code.clone())
-                                .font_size(if s.oklch_mode { 35 } else { 40 })
+                                .font_size(if s.oklch_mode { 25 } else { 30 })
                                 .font_weight(FontWeight::BOLD)
                                 .fill(s.contrast_color())
                                 .view()
@@ -373,6 +377,7 @@ fn main() {
                                         app_button(
                                             id!(),
                                             binding!(State, light_dark_mode_button),
+                                            6.,
                                             if s.dark_mode {
                                                 include_str!("assets/sun.svg")
                                             } else {
@@ -385,8 +390,11 @@ fn main() {
                                         ),
                                         space().height(0.),
                                         row(vec![
-                                            text(id!(), "oklch").fill(s.contrast_color()).finish(),
-                                            space().height(0.).width(10.),
+                                            text(id!(), "oklch")
+                                                .font_weight(FontWeight::SEMI_BOLD)
+                                                .fill(s.contrast_color())
+                                                .finish(),
+                                            space().height(0.).width(5.),
                                             mode_toggle_button(),
                                         ]),
                                     ],
@@ -398,6 +406,7 @@ fn main() {
                                         app_button(
                                             id!(),
                                             binding!(State, paste_button),
+                                            6.,
                                             include_str!("assets/paste.svg"),
                                             |state, app| {
                                                 state.paste(app);
@@ -413,6 +422,7 @@ fn main() {
                                         app_button(
                                             id!(),
                                             binding!(State, copy_button),
+                                            8.,
                                             include_str!("assets/copy.svg"),
                                             |state, _app| {
                                                 state.copy();
@@ -421,12 +431,13 @@ fn main() {
                                     ],
                                 ),
                             ])
-                            .pad(10.),
+                            .pad(5.),
                         ]),
                         color_component_sliders(),
                     ],
                 )
-                .pad(20.),
+                .pad(10.)
+                .pad_top(5.),
             ])
         })
     })
@@ -452,7 +463,7 @@ fn main() {
             *state.saved_state.blocking_lock() = None;
         }
     })
-    .inner_size(450, 350)
+    .inner_size(350, 250)
     // .resizable(false)
     .start()
 }
@@ -460,6 +471,7 @@ fn main() {
 fn app_button<'n>(
     id: u64,
     binding: Binding<State, ButtonState>,
+    icon_padding: f32,
     icon: &'n str,
     on_click: fn(&mut State, &mut AppState<State>),
 ) -> Node<'n, State, AppState<State>> {
@@ -478,7 +490,7 @@ fn app_button<'n>(
                         }
                     })
                     .finish()
-                    .pad(6.)
+                    .pad(icon_padding)
             })
             .on_click(on_click)
             .finish()
@@ -506,8 +518,8 @@ fn mode_toggle_button<'n>() -> Node<'n, State, AppState<State>> {
                 s.save_state(app);
             })
             .finish()
-            .height(25.)
-            .width(45.)
+            .height(20.)
+            .width(40.)
     })
 }
 
@@ -527,7 +539,7 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
             10.,
             (0usize..3)
                 .map(|i| {
-                    row(vec![
+                    column(vec![
                         text_field(
                             id!(i as u64),
                             Binding::new(
@@ -538,8 +550,9 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                         .fill(s.theme_inverted(Theme::Gray0))
                         .background_fill(Some(s.theme(Theme::Gray30)))
                         .cursor_fill(s.theme_inverted(Theme::Gray0))
-                        .highlight_fill(contrasting_highlight.with_alpha(0.25))
-                        .background_stroke(s.theme(Theme::Gray70), contrasting_highlight, 2.)
+                        .highlight_fill(contrasting_highlight.with_alpha(0.5))
+                        .background_stroke(s.theme(Theme::Gray70), contrasting_highlight, 1.)
+                        .background_padding(5.)
                         .on_edit(move |s, app, edit| match edit {
                             EditInteraction::Update(new) => {
                                 if oklch_mode {
@@ -557,101 +570,120 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                                 s.save_state(app);
                             }
                         })
-                        .font_size(24)
+                        .font_size(18)
                         .finish()
-                        .pad(10.),
-                        stack(vec![
+                        .pad(5.),
+                        row(vec![
+                            rect(id!(i as u64))
+                                .fill({
+                                    let mut color = color.clone();
+                                    let drag = -150.;
+                                    State::update_component(
+                                        &mut color,
+                                        i,
+                                        DragState::Updated {
+                                            start: Point::new(0.0, 0.0),
+                                            current: Point::new(drag, 0.),
+                                            start_global: Point::new(0.0, 0.0),
+                                            current_global: Point::new(drag, 0.),
+                                            delta: Point::new(drag, 0.),
+                                            distance: drag as f32,
+                                        },
+                                    );
+                                    color.display()
+                                })
+                                .corner_rounding(5.)
+                                .finish()
+                                .width(5.)
+                                .height(20.)
+                                .pad(5.),
+                            svg(id!(i as u64), include_str!("assets/arrow-left.svg"))
+                                .fill(s.theme_inverted(Theme::Gray0))
+                                .finish()
+                                .height(30.)
+                                .width(8.),
+                            space().height(0.).width(20.),
+                            svg(id!(i as u64), include_str!("assets/arrow-right.svg"))
+                                .fill(s.theme_inverted(Theme::Gray0))
+                                .finish()
+                                .height(30.)
+                                .width(8.),
+                            rect(id!(i as u64))
+                                .fill({
+                                    let mut color = color.clone();
+                                    let drag = 150.;
+                                    State::update_component(
+                                        &mut color,
+                                        i,
+                                        DragState::Updated {
+                                            start: Point::new(0.0, 0.0),
+                                            current: Point::new(drag, 0.),
+                                            start_global: Point::new(0.0, 0.0),
+                                            current_global: Point::new(drag, 0.),
+                                            delta: Point::new(drag, 0.),
+                                            distance: drag as f32,
+                                        },
+                                    );
+                                    color.display()
+                                })
+                                .corner_rounding(5.)
+                                .finish()
+                                .width(5.)
+                                .height(20.)
+                                .pad(5.),
+                        ])
+                        .attach_under(
+                            rect(id!(i as u64))
+                                .fill(
+                                    if (s.component_hover[i] && s.component_dragging.is_none())
+                                        || s.component_dragging == Some(i)
+                                    {
+                                        s.theme(Theme::Gray50)
+                                    } else {
+                                        s.theme(Theme::Gray30)
+                                    },
+                                )
+                                .stroke(s.theme(Theme::Gray70), 1.)
+                                .corner_rounding(5.)
+                                .view()
+                                .finish(),
+                        )
+                        .attach_over(
                             rect(id!(i as u64))
                                 .fill(Color::TRANSPARENT)
                                 .view()
+                                .on_hover(move |s: &mut State, _app, hover| {
+                                    s.component_hover[i] = hover;
+                                })
                                 .on_drag(move |s: &mut State, app, drag| {
                                     State::update_component(&mut s.color, i, drag);
                                     s.sync_component_fields();
                                     s.update_text();
                                     match drag {
                                         DragState::Began { .. } => {
+                                            s.component_dragging = Some(i);
                                             app.end_editing(s);
                                         }
                                         DragState::Completed { .. } => {
+                                            s.component_dragging = None;
                                             s.save_state(app);
                                         }
                                         _ => (),
                                     }
                                 })
                                 .finish(),
-                            rect(id!(i as u64))
-                                .fill(s.theme(Theme::Gray50))
-                                .corner_rounding(5.)
-                                .view()
-                                .finish(),
-                            column(vec![
-                                rect(id!(i as u64))
-                                    .fill({
-                                        let mut color = color.clone();
-                                        let drag = -150.;
-                                        State::update_component(
-                                            &mut color,
-                                            i,
-                                            DragState::Updated {
-                                                start: Point::new(0.0, 0.0),
-                                                current: Point::new(0.0, drag),
-                                                start_global: Point::new(0.0, 0.0),
-                                                current_global: Point::new(0.0, drag),
-                                                delta: Point::new(0.0, drag),
-                                                distance: drag as f32,
-                                            },
-                                        );
-                                        color.display()
-                                    })
-                                    .corner_rounding(5.)
-                                    .finish()
-                                    .height(5.)
-                                    .pad(5.),
-                                space(),
-                                rect(id!(i as u64))
-                                    .fill({
-                                        let mut color = color.clone();
-                                        let drag = 150.;
-                                        State::update_component(
-                                            &mut color,
-                                            i,
-                                            DragState::Updated {
-                                                start: Point::new(0.0, 0.0),
-                                                current: Point::new(0.0, drag),
-                                                start_global: Point::new(0.0, 0.0),
-                                                current_global: Point::new(0.0, drag),
-                                                delta: Point::new(0.0, drag),
-                                                distance: drag as f32,
-                                            },
-                                        );
-                                        color.display()
-                                    })
-                                    .corner_rounding(5.)
-                                    .finish()
-                                    .height(5.)
-                                    .pad(5.),
-                            ]),
-                            svg(id!(i as u64), include_str!("assets/arrow-up-down.svg"))
-                                .fill(s.theme_inverted(Theme::Gray0))
-                                .finish()
-                                .height(30.)
-                                .width(20.),
-                        ])
-                        .height(55.)
-                        .width(30.)
-                        .pad_y(10.)
-                        .pad_trailing(10.),
+                        ),
                     ])
-                    .attach_under(
-                        rect(id!(i as u64))
-                            .fill(s.theme(Theme::Gray30))
-                            .corner_rounding(10.)
-                            .view()
-                            .finish(),
-                    )
                 })
                 .collect(),
         )
+        // .attach_under(
+        //     rect(id!())
+        //         .fill(s.theme(Theme::Gray30))
+        //         .corner_rounding(10.)
+        //         .view()
+        //         .finish(),
+        // )
     })
 }
 
@@ -694,6 +726,7 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
                 } else {
                     s.theme(Theme::Gray70)
                 })
+                .font_size(13)
                 .view()
                 .transition_duration(0.)
                 .finish()
