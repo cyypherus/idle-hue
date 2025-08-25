@@ -135,8 +135,8 @@ impl AutoUpdater {
         let new_exe = temp_dir.path().join(exe_name);
 
         // Use self-replace to handle all Windows-specific complexity
-        self_replace::self_replace(&new_exe)
-            .map_err(|e| anyhow::anyhow!("Failed to replace executable: {}", e))?;
+        self_replace::self_replace(&new_exe).expect("Failed to replace executable");
+        // std::fs::remove_file(&new_exe)?;
 
         Ok(())
     }
@@ -231,9 +231,7 @@ impl AutoUpdater {
 
         #[cfg(target_os = "windows")]
         {
-            std::process::Command::new(&current_exe)
-                .creation_flags(0x00000008) // DETACHED_PROCESS
-                .spawn()?;
+            std::process::Command::new(&current_exe).spawn()?;
         }
 
         #[cfg(target_os = "macos")]
@@ -243,9 +241,9 @@ impl AutoUpdater {
                 .arg("-n")
                 .arg(&app_bundle)
                 .spawn()?;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         std::process::exit(0);
     }
 
