@@ -3891,7 +3891,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ui"
 version = "0.1.0"
-source = "git+https://github.com/cyypherus/ui#fd0ddcf744b21f29d62a10362d01d4eebb7c255d"
+source = "git+https://github.com/cyypherus/ui#01e972701173d37541efebbd173cb7130988d92b"
 dependencies = [
  "backer",
  "clipboard-rs",

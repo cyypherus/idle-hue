@@ -624,6 +624,8 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                                 s.save_state(app);
                             }
                         })
+                        .enter_end_editing()
+                        .esc_end_editing()
                         .font_size(18)
                         .finish()
                         .pad(5.),
@@ -716,7 +718,7 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                                     match drag {
                                         DragState::Began { .. } => {
                                             s.component_dragging = Some(i);
-                                            app.end_editing(s);
+                                            app.end_editing();
                                         }
                                         DragState::Completed { .. } => {
                                             s.component_dragging = None;
