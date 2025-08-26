@@ -519,7 +519,7 @@ fn main() {
     })
     .title("idle-hue")
     .inner_size(350, 250)
-    // .resizable(false)
+    .icon(include_bytes!("assets/icon32.png"))
     .start()
 }
 
