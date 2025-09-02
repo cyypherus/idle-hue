@@ -41,8 +41,8 @@ struct State {
     paste_button: ButtonState,
     light_dark_mode_button: ButtonState,
     color: CurrentColor,
-    oklch_mode: bool,
-    mode_picker: ToggleState,
+    color_mode: ColorMode,
+    mode_dropdown: DropdownState,
     component_fields: [TextState; 3],
     component_hover: [bool; 3],
     component_dragging: Option<usize>,
@@ -117,22 +117,34 @@ impl State {
         }
     }
     fn update_text(&mut self) {
-        match self.color {
-            CurrentColor::Srgb(color) => {
-                self.color_code = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    (color.components[0] * 255.0) as u8,
-                    (color.components[1] * 255.0) as u8,
-                    (color.components[2] * 255.0) as u8,
-                );
+        match self.color_mode {
+            ColorMode::Hex => {
+                if let CurrentColor::Srgb(color) = self.color {
+                    self.color_code = format!(
+                        "#{:02x}{:02x}{:02x}",
+                        (color.components[0] * 255.0) as u8,
+                        (color.components[1] * 255.0) as u8,
+                        (color.components[2] * 255.0) as u8,
+                    );
+                }
             }
-
-            CurrentColor::Oklch(color) => {
-                let color_text = format!(
-                    "oklch({:.2} {:.2} {:.0})",
-                    color.components[0], color.components[1], color.components[2],
-                );
-                self.color_code = color_text;
+            ColorMode::Rgb => {
+                if let CurrentColor::Srgb(color) = self.color {
+                    self.color_code = format!(
+                        "rgb({}, {}, {})",
+                        (color.components[0] * 255.0) as u8,
+                        (color.components[1] * 255.0) as u8,
+                        (color.components[2] * 255.0) as u8,
+                    );
+                }
+            }
+            ColorMode::Oklch => {
+                if let CurrentColor::Oklch(color) = self.color {
+                    self.color_code = format!(
+                        "oklch({:.2} {:.2} {:.0})",
+                        color.components[0], color.components[1], color.components[2],
+                    );
+                }
             }
         }
     }
@@ -194,30 +206,36 @@ impl State {
     }
 
     fn clamp_color_components(&mut self) {
-        if self.oklch_mode {
-            self.color.components_mut()[0] = self.color.components()[0].clamp(0.0, 1.0);
-            self.color.components_mut()[1] = self.color.components()[1].clamp(0.0, 0.5);
-            self.color.components_mut()[2] = self.color.components()[2].clamp(0.0, 360.0);
-        } else {
-            for i in 0..3 {
-                self.color.components_mut()[i] = self.color.components()[i].clamp(0.0, 1.0);
+        match self.color_mode {
+            ColorMode::Hex | ColorMode::Rgb => {
+                for i in 0..3 {
+                    self.color.components_mut()[i] = self.color.components()[i].clamp(0.0, 1.0);
+                }
+            }
+            ColorMode::Oklch => {
+                self.color.components_mut()[0] = self.color.components()[0].clamp(0.0, 1.0);
+                self.color.components_mut()[1] = self.color.components()[1].clamp(0.0, 0.5);
+                self.color.components_mut()[2] = self.color.components()[2].clamp(0.0, 360.0);
             }
         }
     }
 
     fn sync_component_fields(&mut self) {
-        if self.oklch_mode {
-            self.component_fields[0].text = format!("{:.2}", self.color.components()[0])
-                .trim_start_matches('0')
-                .to_string();
-            self.component_fields[1].text = format!("{:.2}", self.color.components()[1])
-                .trim_start_matches('0')
-                .to_string();
-            self.component_fields[2].text = format!("{:.0}", self.color.components()[2]);
-        } else {
-            for i in 0..3 {
-                self.component_fields[i].text =
-                    format!("{}", (self.color.components()[i] * 255.) as u8);
+        match self.color_mode {
+            ColorMode::Hex | ColorMode::Rgb => {
+                for i in 0..3 {
+                    self.component_fields[i].text =
+                        format!("{}", (self.color.components()[i] * 255.) as u8);
+                }
+            }
+            ColorMode::Oklch => {
+                self.component_fields[0].text = format!("{:.2}", self.color.components()[0])
+                    .trim_start_matches('0')
+                    .to_string();
+                self.component_fields[1].text = format!("{:.2}", self.color.components()[1])
+                    .trim_start_matches('0')
+                    .to_string();
+                self.component_fields[2].text = format!("{:.0}", self.color.components()[2]);
             }
         }
     }
@@ -267,14 +285,19 @@ impl State {
         match parsed.cs {
             ColorSpaceTag::Srgb => {
                 self.color = CurrentColor::Srgb(parsed.to_alpha_color::<Srgb>());
-                self.oklch_mode = false;
-                self.mode_picker.on = self.oklch_mode;
+                if text.contains("rgb") {
+                    self.color_mode = ColorMode::Rgb;
+                    self.mode_dropdown.selected = 1;
+                } else {
+                    self.color_mode = ColorMode::Hex;
+                    self.mode_dropdown.selected = 0;
+                }
                 Ok(())
             }
             ColorSpaceTag::Oklch => {
                 self.color = CurrentColor::Oklch(parsed.to_alpha_color::<Oklch>());
-                self.oklch_mode = true;
-                self.mode_picker.on = self.oklch_mode;
+                self.color_mode = ColorMode::Oklch;
+                self.mode_dropdown.selected = 2;
                 Ok(())
             }
             _ => Err("Unsupported color space".to_string()),
@@ -385,8 +408,8 @@ impl State {
             paste_button: ButtonState::default(),
             light_dark_mode_button: ButtonState::default(),
             color: CurrentColor::Oklch(AlphaColor::<Oklch>::new([1.0, 0.0, 0.0, 1.0])),
-            oklch_mode: true,
-            mode_picker: ToggleState::on(),
+            color_mode: ColorMode::Hex,
+            mode_dropdown: DropdownState::default(),
             component_fields: [
                 TextState::default(),
                 TextState::default(),
@@ -425,7 +448,10 @@ fn main() {
                                 .view()
                                 .finish(),
                             text(id!(), s.color_code.clone())
-                                .font_size(if s.oklch_mode { 25 } else { 30 })
+                                .font_size(match s.color_mode {
+                                    ColorMode::Hex | ColorMode::Rgb => 30,
+                                    ColorMode::Oklch => 25,
+                                })
                                 .font_weight(FontWeight::BOLD)
                                 .fill(s.contrast_color())
                                 .view()
@@ -450,16 +476,10 @@ fn main() {
                                             },
                                         ),
                                         space().height(0.),
-                                        row(vec![
-                                            text(id!(), "oklch")
-                                                .font_weight(FontWeight::SEMI_BOLD)
-                                                .fill(s.contrast_color())
-                                                .finish(),
-                                            space().height(0.).width(5.),
-                                            mode_toggle_button(),
-                                        ]),
+                                        mode_toggle_button(),
                                     ],
-                                ),
+                                )
+                                .align_contents(Align::Top),
                                 space(),
                                 row_spaced(
                                     10.,
@@ -554,42 +574,75 @@ fn app_button<'n>(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ColorMode {
+    Hex,
+    Rgb,
+    Oklch,
+}
+
+impl ColorMode {
+    fn to_string(self) -> &'static str {
+        match self {
+            ColorMode::Hex => "hex",
+            ColorMode::Rgb => "rgb",
+            ColorMode::Oklch => "oklch",
+        }
+    }
+    fn cases() -> Vec<ColorMode> {
+        vec![ColorMode::Hex, ColorMode::Rgb, ColorMode::Oklch]
+    }
+}
+
 fn mode_toggle_button<'n>() -> Node<'n, State, AppState<State>> {
     dynamic(|s: &mut State, _app| {
-        toggle(id!(), binding!(State, mode_picker))
-            .on_fill(s.theme(Theme::Gray50))
-            .off_fill(s.theme(Theme::Gray30))
-            .knob_fill(s.theme_inverted(Theme::Gray0))
-            .on_toggle(|s, app, on| {
-                if on {
-                    s.oklch_mode = true;
-                    s.rgb_to_oklch();
-                } else {
-                    s.oklch_mode = false;
+        dropdown(
+            id!(),
+            binding!(State, mode_dropdown),
+            ColorMode::cases()
+                .iter()
+                .enumerate()
+                .map(|(index, mode)| text(id!(index as u64), mode.to_string()))
+                .collect(),
+        )
+        .corner_rounding(7.)
+        .fill(s.theme(Theme::Gray30))
+        .text_fill(s.theme_inverted(Theme::Gray0))
+        .highlight_fill(s.theme(Theme::Gray70))
+        .on_select(|s, app, selection| {
+            let selection = ColorMode::cases().remove(selection);
+            match &selection {
+                ColorMode::Hex | ColorMode::Rgb => {
                     s.oklch_to_rgb();
                 }
-                s.sync_component_fields();
-                s.update_text();
-                s.save_state(app);
-            })
-            .finish()
-            .height(20.)
-            .width(40.)
+                ColorMode::Oklch => {
+                    s.rgb_to_oklch();
+                }
+            }
+            s.color_mode = selection;
+            s.sync_component_fields();
+            s.update_text();
+            s.save_state(app);
+        })
+        .finish()
+        .height(20.)
+        .width(63.)
     })
 }
 
 fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
     dynamic(|s: &mut State, _app| {
         let color = s.color.clone();
-        let oklch_mode = s.oklch_mode;
         let contrasting_highlight = {
             let luminance = s.color.display().discard_alpha().relative_luminance();
-            if (0.15..0.9).contains(&luminance) {
+            let range = if s.dark_mode { 0.1..1. } else { 0.0..0.9 };
+            if !range.contains(&luminance) {
                 s.theme_inverted(Theme::Gray0)
             } else {
                 s.color.display()
             }
-        };
+        }
+        .with_alpha(0.5);
         row_spaced(
             10.,
             (0usize..3)
@@ -612,13 +665,19 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
                             .background_padding(5.)
                             .on_edit(move |s, app, edit| match edit {
                                 EditInteraction::Update(new) => {
-                                    if oklch_mode {
-                                        if let Ok(value) = new.parse::<f32>() {
-                                            s.color.components_mut()[i] = value;
+                                    match s.color_mode {
+                                        ColorMode::Hex | ColorMode::Rgb => {
+                                            if let Ok(value) = new.parse::<u8>() {
+                                                s.color.components_mut()[i] = value as f32 / 255.;
+                                            }
                                         }
-                                    } else if let Ok(value) = new.parse::<u8>() {
-                                        s.color.components_mut()[i] = value as f32 / 255.;
+                                        ColorMode::Oklch => {
+                                            if let Ok(value) = new.parse::<f32>() {
+                                                s.color.components_mut()[i] = value;
+                                            }
+                                        }
                                     }
+                                    s.update_text();
                                 }
                                 EditInteraction::End => {
                                     s.clamp_color_components();
