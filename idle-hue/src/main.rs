@@ -4,11 +4,13 @@ mod auto_update;
 
 use arboard::Clipboard;
 use auto_update::{AutoUpdater, UpdateStatus};
+use color::palette::css::TRANSPARENT;
 use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
 use directories::ProjectDirs;
 use kurbo::Point;
 use parley::FontWeight;
 use serde::{Deserialize, Serialize};
+use std::array::from_fn;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,11 +29,36 @@ const GRAY_30_L: Color = Color::from_rgb8(0xea, 0xe4, 0xe6); // #eae4e6
 const GRAY_50_L: Color = Color::from_rgb8(0xd9, 0xd2, 0xd4); // #d9d2d4
 const GRAY_70_L: Color = Color::from_rgb8(0xb6, 0xb6, 0xb8); // #bdb6b8
 
+const PALETTE_WIDTH: usize = 3;
+const PALETTE_HEIGHT: usize = 8;
+const PALETTE_SIZE: usize = PALETTE_WIDTH * PALETTE_HEIGHT;
+
 enum Theme {
     Gray0,
     Gray30,
     Gray50,
     Gray70,
+}
+
+#[derive(Clone, Debug)]
+struct PaletteState {
+    colors: [Option<String>; PALETTE_SIZE],
+    hover: [bool; PALETTE_SIZE],
+    dragging: Option<usize>,
+    drag_target: Option<usize>,
+    drag_offset: Point,
+}
+
+impl Default for PaletteState {
+    fn default() -> Self {
+        Self {
+            colors: from_fn(|_| None),
+            hover: [false; PALETTE_SIZE],
+            dragging: None,
+            drag_target: None,
+            drag_offset: Point::ZERO,
+        }
+    }
 }
 
 struct State {
@@ -50,6 +77,7 @@ struct State {
     update_status: Arc<Mutex<auto_update::UpdateStatus>>,
     saved_state: Arc<Mutex<Option<SavedState>>>,
     update_button: ButtonState,
+    palette: PaletteState,
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +111,7 @@ impl CurrentColor {
 struct SavedState {
     text: String,
     dark_mode: Option<bool>,
+    palette: Option<[Option<String>; PALETTE_SIZE]>,
 }
 
 impl State {
@@ -325,6 +354,7 @@ impl State {
         let saved_state = SavedState {
             text: self.color_code.clone(),
             dark_mode: Some(self.dark_mode),
+            palette: Some(self.palette.colors.clone()),
         };
         let redraw = app.redraw_trigger();
         app.spawn(async move {
@@ -421,6 +451,7 @@ impl State {
             update_status: Arc::new(Mutex::new(auto_update::UpdateStatus::Idle)),
             saved_state: Arc::new(Mutex::new(None)),
             update_button: ButtonState::default(),
+            palette: PaletteState::default(),
         };
         s.sync_component_fields();
         s.update_text();
@@ -440,81 +471,96 @@ fn main() {
                     10.,
                     vec![
                         row(vec![space().height(0.), update_button()]),
-                        stack(vec![
-                            rect(id!())
-                                .fill(s.color.display())
-                                .stroke(s.theme(Theme::Gray50), 1.)
-                                .corner_rounding(10.)
-                                .view()
-                                .finish(),
-                            text(id!(), s.color_code.clone())
-                                .font_size(match s.color_mode {
-                                    ColorMode::Hex | ColorMode::Rgb => 30,
-                                    ColorMode::Oklch => 25,
-                                })
-                                .font_weight(FontWeight::BOLD)
-                                .fill(s.contrast_color())
-                                .view()
-                                .transition_duration(0.)
-                                .finish(),
-                            column(vec![
-                                row_spaced(
+                        row_spaced(
+                            10.,
+                            vec![
+                                column_spaced(
                                     10.,
                                     vec![
-                                        app_button(
-                                            id!(),
-                                            binding!(State, light_dark_mode_button),
-                                            6.,
-                                            if s.dark_mode {
-                                                include_str!("assets/sun.svg")
-                                            } else {
-                                                include_str!("assets/moon.svg")
-                                            },
-                                            |state, app| {
-                                                state.dark_mode = !state.dark_mode;
-                                                state.save_state(app);
-                                            },
-                                        ),
-                                        space().height(0.),
-                                        mode_toggle_button(),
-                                    ],
-                                )
-                                .align_contents(Align::Top),
-                                space(),
-                                row_spaced(
-                                    10.,
-                                    vec![
-                                        app_button(
-                                            id!(),
-                                            binding!(State, paste_button),
-                                            6.,
-                                            include_str!("assets/paste.svg"),
-                                            |state, app| {
-                                                state.paste(app);
-                                            },
-                                        ),
-                                        space().height(0.),
-                                        if let Some(error) = s.error.blocking_lock().clone() {
-                                            text(id!(), error).fill(s.contrast_color()).finish()
-                                        } else {
-                                            empty()
-                                        },
-                                        space().height(0.),
-                                        app_button(
-                                            id!(),
-                                            binding!(State, copy_button),
-                                            8.,
-                                            include_str!("assets/copy.svg"),
-                                            |state, _app| {
-                                                state.copy();
-                                            },
-                                        ),
+                                        stack(vec![
+                                            rect(id!())
+                                                .fill(s.color.display())
+                                                .stroke(s.theme(Theme::Gray50), 1.)
+                                                .corner_rounding(10.)
+                                                .view()
+                                                .finish(),
+                                            text(id!(), s.color_code.clone())
+                                                .font_size(match s.color_mode {
+                                                    ColorMode::Hex | ColorMode::Rgb => 30,
+                                                    ColorMode::Oklch => 25,
+                                                })
+                                                .font_weight(FontWeight::BOLD)
+                                                .fill(s.contrast_color())
+                                                .view()
+                                                .transition_duration(0.)
+                                                .finish(),
+                                            column(vec![
+                                                row_spaced(
+                                                    10.,
+                                                    vec![
+                                                        app_button(
+                                                            id!(),
+                                                            binding!(State, light_dark_mode_button),
+                                                            6.,
+                                                            if s.dark_mode {
+                                                                include_str!("assets/sun.svg")
+                                                            } else {
+                                                                include_str!("assets/moon.svg")
+                                                            },
+                                                            |state, app| {
+                                                                state.dark_mode = !state.dark_mode;
+                                                                state.save_state(app);
+                                                            },
+                                                        ),
+                                                        space().height(0.),
+                                                        mode_toggle_button(),
+                                                    ],
+                                                )
+                                                .align_contents(Align::Top),
+                                                space(),
+                                                row_spaced(
+                                                    10.,
+                                                    vec![
+                                                        app_button(
+                                                            id!(),
+                                                            binding!(State, paste_button),
+                                                            6.,
+                                                            include_str!("assets/paste.svg"),
+                                                            |state, app| {
+                                                                state.paste(app);
+                                                            },
+                                                        ),
+                                                        space().height(0.),
+                                                        if let Some(error) =
+                                                            s.error.blocking_lock().clone()
+                                                        {
+                                                            text(id!(), error)
+                                                                .fill(s.contrast_color())
+                                                                .finish()
+                                                        } else {
+                                                            empty()
+                                                        },
+                                                        space().height(0.),
+                                                        app_button(
+                                                            id!(),
+                                                            binding!(State, copy_button),
+                                                            8.,
+                                                            include_str!("assets/copy.svg"),
+                                                            |state, _app| {
+                                                                state.copy();
+                                                            },
+                                                        ),
+                                                    ],
+                                                ),
+                                            ])
+                                            .pad(5.),
+                                        ]),
+                                        color_component_sliders(),
                                     ],
                                 ),
-                            ])
-                            .pad(5.),
-                        ]),
-                        color_component_sliders(),
+                                palette_grid(),
+                            ],
+                        ),
                     ],
                 )
                 .pad(10.)
@@ -532,13 +578,16 @@ fn main() {
             if let Some(dark_mode) = saved.dark_mode {
                 state.dark_mode = dark_mode;
             }
+            if let Some(ref palette) = saved.palette {
+                state.palette.colors = palette.clone();
+            }
             state.update_text();
             state.sync_component_fields();
             *state.saved_state.blocking_lock() = None;
         }
     })
     .title("idle-hue")
-    .inner_size(350, 250)
+    .inner_size(450, 250)
     .icon(include_bytes!("assets/icon32.png"))
     .start()
 }
@@ -850,4 +899,186 @@ fn update_button<'n>() -> Node<'n, State, AppState<State>> {
             .finish()
             .height(10.)
     })
+}
+
+fn palette_grid<'n>() -> Node<'n, State, AppState<State>> {
+    dynamic(|s: &mut State, _app| {
+        let rows = (0..PALETTE_HEIGHT)
+            .map(|row| {
+                let cols = (0..PALETTE_WIDTH)
+                    .map(|col| {
+                        let index = row * PALETTE_WIDTH + col;
+                        let palette_color_str = s.palette.colors[index].clone();
+                        let is_dragging = s.palette.dragging == Some(index);
+                        let is_drag_target =
+                            s.palette.drag_target == Some(index) && s.palette.dragging.is_some();
+
+                        stack(vec![
+                            palette_swatch(
+                                index,
+                                palette_color_str.clone(),
+                                is_dragging,
+                                is_drag_target,
+                                s,
+                            ),
+                            palette_sensor(index),
+                            svg(id!(index as u64), include_str!("assets/plus.svg"))
+                                .fill(
+                                    if palette_color_str.is_none()
+                                        && s.palette.hover[index]
+                                        && !is_dragging
+                                    {
+                                        s.theme_inverted(Theme::Gray0)
+                                    } else {
+                                        TRANSPARENT
+                                    },
+                                )
+                                .finish()
+                                .height(15.)
+                                .width(15.),
+                        ])
+                        .height(20.)
+                        .width(20.)
+                    })
+                    .collect::<Vec<_>>();
+
+                row_spaced(5., cols)
+            })
+            .collect::<Vec<_>>();
+
+        column_spaced(5., rows).attach_under(
+            rect(id!())
+                .fill(Color::TRANSPARENT)
+                .view()
+                .on_hover(move |state: &mut State, _app, hovered| {
+                    if state.palette.dragging.is_some() && !hovered {
+                        state.palette.drag_target = None;
+                    }
+                })
+                .finish(),
+        )
+    })
+}
+
+fn palette_swatch<'n>(
+    index: usize,
+    palette_color_str: Option<String>,
+    is_dragging: bool,
+    is_drag_target: bool,
+    s: &mut State,
+) -> Node<'n, State, AppState<State>> {
+    rect(id!(index as u64))
+        .fill(if let Some(ref color_str) = palette_color_str {
+            if let Ok(parsed) = parse_color(color_str) {
+                match parsed.cs {
+                    ColorSpaceTag::Srgb => {
+                        CurrentColor::Srgb(parsed.to_alpha_color::<Srgb>()).display()
+                    }
+                    ColorSpaceTag::Oklch => {
+                        CurrentColor::Oklch(parsed.to_alpha_color::<Oklch>()).display()
+                    }
+                    _ => s.theme(Theme::Gray30),
+                }
+            } else {
+                s.theme(Theme::Gray30)
+            }
+        } else {
+            s.theme(Theme::Gray30)
+        })
+        .stroke(
+            if is_drag_target {
+                s.theme_inverted(Theme::Gray0)
+            } else {
+                s.theme(Theme::Gray50)
+            },
+            if is_dragging {
+                3.
+            } else if is_drag_target {
+                2.
+            } else {
+                1.
+            },
+        )
+        .corner_rounding(6.)
+        .view()
+        .z_index(if is_dragging { 1 } else { 0 })
+        .transition_duration(20.)
+        .finish()
+        .offset(
+            if is_dragging {
+                s.palette.drag_offset.x as f32
+            } else {
+                0.0
+            },
+            if is_dragging {
+                s.palette.drag_offset.y as f32
+            } else {
+                0.0
+            },
+        )
+}
+
+fn palette_sensor<'n>(index: usize) -> Node<'n, State, AppState<State>> {
+    rect(id!(index as u64))
+        .fill(Color::TRANSPARENT)
+        .view()
+        .on_hover(move |state: &mut State, _app, hovered| {
+            state.palette.hover[index] = hovered;
+            if state.palette.dragging.is_some() && hovered {
+                state.palette.drag_target = Some(index);
+            }
+        })
+        .on_click(
+            move |state: &mut State, app, click_state, _click_location| {
+                if matches!(click_state, ClickState::Completed) {
+                    if let Some(ref palette_color_str) = state.palette.colors[index] {
+                        if state.parse_color(palette_color_str.clone()).is_ok() {
+                            state.update_text();
+                            state.sync_component_fields();
+                            state.save_state(app);
+                        }
+                    } else {
+                        state.palette.colors[index] = Some(state.color_code.clone());
+                        state.save_state(app);
+                    }
+                }
+            },
+        )
+        .on_drag(move |state: &mut State, app, drag| {
+            match drag {
+                DragState::Began { .. } => {
+                    if state.palette.colors[index].is_some() {
+                        state.palette.dragging = Some(index);
+                        state.palette.drag_offset = Point::ZERO;
+                    }
+                }
+                DragState::Updated { start, current, .. } => {
+                    if state.palette.dragging == Some(index) {
+                        state.palette.drag_offset =
+                            Point::new(current.x - start.x, current.y - start.y);
+                    }
+                }
+                DragState::Completed { .. } => {
+                    if let Some(dragging_index) = state.palette.dragging {
+                        if let Some(target_index) = state.palette.drag_target {
+                            // Swap colors
+                            let dragging_color = state.palette.colors[dragging_index].clone();
+                            let target_color = state.palette.colors[target_index].clone();
+                            state.palette.colors[dragging_index] = target_color;
+                            state.palette.colors[target_index] = dragging_color;
+                            state.save_state(app);
+                        } else {
+                            // Dragged outside palette - remove color
+                            state.palette.colors[dragging_index] = None;
+                            state.save_state(app);
+                        }
+
+                        state.palette.dragging = None;
+                        state.palette.drag_target = None;
+                        state.palette.drag_offset = Point::ZERO;
+                    }
+                }
+            }
+        })
+        .finish()
 }
