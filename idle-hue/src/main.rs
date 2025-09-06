@@ -458,8 +458,9 @@ fn main() {
                                 .transition_duration(0.)
                                 .finish(),
                             column(vec![
-                                row_spaced(
+                                row_spaced_aligned(
                                     10.,
+                                    Align::Top,
                                     vec![
                                         app_button(
                                             id!(),
@@ -478,8 +479,7 @@ fn main() {
                                         space().height(0.),
                                         mode_toggle_button(),
                                     ],
-                                )
-                                .align_contents(Align::Top),
+                                ),
                                 space(),
                                 row_spaced(
                                     10.,
@@ -543,13 +543,13 @@ fn main() {
     .start()
 }
 
-fn app_button<'n>(
+fn app_button(
     id: u64,
     binding: Binding<State, ButtonState>,
     icon_padding: f32,
-    icon: &'n str,
+    icon: &'static str,
     on_click: fn(&mut State, &mut AppState<State>),
-) -> Node<'n, State, AppState<State>> {
+) -> Node<State, AppState<State>> {
     dynamic(move |s: &mut State, _app| {
         let color = s.theme_inverted(Theme::Gray0);
         button(id!(id), binding.clone())
@@ -594,7 +594,7 @@ impl ColorMode {
     }
 }
 
-fn mode_toggle_button<'n>() -> Node<'n, State, AppState<State>> {
+fn mode_toggle_button() -> Node<State, AppState<State>> {
     dynamic(|s: &mut State, _app| {
         dropdown(
             id!(),
@@ -630,7 +630,7 @@ fn mode_toggle_button<'n>() -> Node<'n, State, AppState<State>> {
     })
 }
 
-fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
+fn color_component_sliders() -> Node<State, AppState<State>> {
     dynamic(|s: &mut State, _app| {
         let color = s.color.clone();
         let contrasting_highlight = {
@@ -798,7 +798,7 @@ fn color_component_sliders<'n>() -> Node<'n, State, AppState<State>> {
     })
 }
 
-fn update_button<'n>() -> Node<'n, State, AppState<State>> {
+fn update_button() -> Node<State, AppState<State>> {
     dynamic(|s: &mut State, _app| {
         let current_status = s.update_status.blocking_lock().clone();
 
