@@ -4,11 +4,13 @@ mod auto_update;
 
 use arboard::Clipboard;
 use auto_update::{AutoUpdater, UpdateStatus};
+use color::palette::css::TRANSPARENT;
 use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
 use directories::ProjectDirs;
 use kurbo::Point;
 use parley::FontWeight;
 use serde::{Deserialize, Serialize};
+use std::array::from_fn;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,11 +29,36 @@ const GRAY_30_L: Color = Color::from_rgb8(0xea, 0xe4, 0xe6); // #eae4e6
 const GRAY_50_L: Color = Color::from_rgb8(0xd9, 0xd2, 0xd4); // #d9d2d4
 const GRAY_70_L: Color = Color::from_rgb8(0xb6, 0xb6, 0xb8); // #bdb6b8
 
+const PALETTE_WIDTH: usize = 3;
+const PALETTE_HEIGHT: usize = 8;
+const PALETTE_SIZE: usize = PALETTE_WIDTH * PALETTE_HEIGHT;
+
 enum Theme {
     Gray0,
     Gray30,
     Gray50,
     Gray70,
+}
+
+#[derive(Clone, Debug)]
+struct PaletteState {
+    colors: [Option<CurrentColor>; PALETTE_SIZE],
+    hover: [bool; PALETTE_SIZE],
+    dragging: Option<usize>,
+    drag_target: Option<usize>,
+    drag_offset: Point,
+}
+
+impl Default for PaletteState {
+    fn default() -> Self {
+        Self {
+            colors: from_fn(|_| None),
+            hover: [false; PALETTE_SIZE],
+            dragging: None,
+            drag_target: None,
+            drag_offset: Point::ZERO,
+        }
+    }
 }
 
 struct State {
@@ -41,7 +68,6 @@ struct State {
     paste_button: ButtonState,
     light_dark_mode_button: ButtonState,
     color: CurrentColor,
-    color_mode: ColorMode,
     mode_dropdown: DropdownState,
     component_fields: [TextState; 3],
     component_hover: [bool; 3],
@@ -50,11 +76,13 @@ struct State {
     update_status: Arc<Mutex<auto_update::UpdateStatus>>,
     saved_state: Arc<Mutex<Option<SavedState>>>,
     update_button: ButtonState,
+    palette: PaletteState,
 }
 
 #[derive(Clone, Debug)]
 enum CurrentColor {
     Srgb(AlphaColor<Srgb>),
+    SrgbHex(AlphaColor<Srgb>),
     Oklch(AlphaColor<Oklch>),
 }
 
@@ -62,19 +90,60 @@ impl CurrentColor {
     fn components(&self) -> [f32; 4] {
         match self {
             CurrentColor::Srgb(color) => color.components,
+            CurrentColor::SrgbHex(color) => color.components,
             CurrentColor::Oklch(color) => color.components,
-        }
-    }
-    fn components_mut(&mut self) -> &mut [f32; 4] {
-        match self {
-            CurrentColor::Srgb(color) => &mut color.components,
-            CurrentColor::Oklch(color) => &mut color.components,
         }
     }
     fn display(&self) -> Color {
         match self {
             CurrentColor::Srgb(color) => color.convert::<Srgb>(),
+            CurrentColor::SrgbHex(color) => color.convert::<Srgb>(),
             CurrentColor::Oklch(color) => color.convert::<Srgb>(),
+        }
+    }
+    fn from_code(input: &str) -> Result<CurrentColor, String> {
+        let Some(parsed) = parse_color(input)
+            .ok()
+            .or(parse_color(format!("#{input}").as_str()).ok())
+        else {
+            return Err("Color parsing failed".to_string());
+        };
+        match parsed.cs {
+            ColorSpaceTag::Srgb => {
+                if input.contains("rgb") {
+                    Ok(CurrentColor::Srgb(parsed.to_alpha_color::<Srgb>()))
+                } else {
+                    Ok(CurrentColor::SrgbHex(parsed.to_alpha_color::<Srgb>()))
+                }
+            }
+            ColorSpaceTag::Oklch => Ok(CurrentColor::Oklch(parsed.to_alpha_color::<Oklch>())),
+            _ => Err("Unsupported color space".to_string()),
+        }
+    }
+    fn to_code(&self) -> String {
+        match self {
+            CurrentColor::SrgbHex(color) => {
+                format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (color.components[0] * 255.0) as u8,
+                    (color.components[1] * 255.0) as u8,
+                    (color.components[2] * 255.0) as u8,
+                )
+            }
+            CurrentColor::Srgb(color) => {
+                format!(
+                    "rgb({}, {}, {})",
+                    (color.components[0] * 255.0) as u8,
+                    (color.components[1] * 255.0) as u8,
+                    (color.components[2] * 255.0) as u8,
+                )
+            }
+            CurrentColor::Oklch(color) => {
+                format!(
+                    "oklch({:.2} {:.2} {:.0})",
+                    color.components[0], color.components[1], color.components[2],
+                )
+            }
         }
     }
 }
@@ -83,6 +152,7 @@ impl CurrentColor {
 struct SavedState {
     text: String,
     dark_mode: Option<bool>,
+    palette: Option<[Option<String>; PALETTE_SIZE]>,
 }
 
 impl State {
@@ -117,36 +187,7 @@ impl State {
         }
     }
     fn update_text(&mut self) {
-        match self.color_mode {
-            ColorMode::Hex => {
-                if let CurrentColor::Srgb(color) = self.color {
-                    self.color_code = format!(
-                        "#{:02x}{:02x}{:02x}",
-                        (color.components[0] * 255.0) as u8,
-                        (color.components[1] * 255.0) as u8,
-                        (color.components[2] * 255.0) as u8,
-                    );
-                }
-            }
-            ColorMode::Rgb => {
-                if let CurrentColor::Srgb(color) = self.color {
-                    self.color_code = format!(
-                        "rgb({}, {}, {})",
-                        (color.components[0] * 255.0) as u8,
-                        (color.components[1] * 255.0) as u8,
-                        (color.components[2] * 255.0) as u8,
-                    );
-                }
-            }
-            ColorMode::Oklch => {
-                if let CurrentColor::Oklch(color) = self.color {
-                    self.color_code = format!(
-                        "oklch({:.2} {:.2} {:.0})",
-                        color.components[0], color.components[1], color.components[2],
-                    );
-                }
-            }
-        }
+        self.color_code = self.color.to_code()
     }
 
     fn rgb_to_oklch(&mut self) {
@@ -196,7 +237,7 @@ impl State {
                         }
                         _ => (),
                     },
-                    CurrentColor::Srgb(color) => {
+                    CurrentColor::Srgb(color) | CurrentColor::SrgbHex(color) => {
                         color.components[component_index] =
                             (color.components[component_index] - x * 0.001).clamp(0.0, 1.0);
                     }
@@ -206,36 +247,36 @@ impl State {
     }
 
     fn clamp_color_components(&mut self) {
-        match self.color_mode {
-            ColorMode::Hex | ColorMode::Rgb => {
+        match self.color {
+            CurrentColor::Srgb(mut color) | CurrentColor::SrgbHex(mut color) => {
                 for i in 0..3 {
-                    self.color.components_mut()[i] = self.color.components()[i].clamp(0.0, 1.0);
+                    color.components[i] = color.components[i].clamp(0.0, 1.0);
                 }
             }
-            ColorMode::Oklch => {
-                self.color.components_mut()[0] = self.color.components()[0].clamp(0.0, 1.0);
-                self.color.components_mut()[1] = self.color.components()[1].clamp(0.0, 0.5);
-                self.color.components_mut()[2] = self.color.components()[2].clamp(0.0, 360.0);
+            CurrentColor::Oklch(mut color) => {
+                color.components[0] = color.components[0].clamp(0.0, 1.0);
+                color.components[1] = color.components[1].clamp(0.0, 0.5);
+                color.components[2] = color.components[2].clamp(0.0, 360.0);
             }
         }
     }
 
     fn sync_component_fields(&mut self) {
-        match self.color_mode {
-            ColorMode::Hex | ColorMode::Rgb => {
+        match self.color {
+            CurrentColor::Srgb(color) | CurrentColor::SrgbHex(color) => {
                 for i in 0..3 {
                     self.component_fields[i].text =
-                        format!("{}", (self.color.components()[i] * 255.) as u8);
+                        format!("{}", (color.components[i] * 255.) as u8);
                 }
             }
-            ColorMode::Oklch => {
-                self.component_fields[0].text = format!("{:.2}", self.color.components()[0])
+            CurrentColor::Oklch(color) => {
+                self.component_fields[0].text = format!("{:.2}", color.components[0])
                     .trim_start_matches('0')
                     .to_string();
-                self.component_fields[1].text = format!("{:.2}", self.color.components()[1])
+                self.component_fields[1].text = format!("{:.2}", color.components[1])
                     .trim_start_matches('0')
                     .to_string();
-                self.component_fields[2].text = format!("{:.0}", self.color.components()[2]);
+                self.component_fields[2].text = format!("{:.0}", color.components[2]);
             }
         }
     }
@@ -275,33 +316,16 @@ impl State {
         self.save_state(app);
     }
 
-    fn parse_color(&mut self, text: String) -> Result<(), String> {
-        let Some(parsed) = parse_color(&text)
-            .ok()
-            .or(parse_color(format!("#{text}").as_str()).ok())
-        else {
-            return Err("Color parsing failed".to_string());
-        };
-        match parsed.cs {
-            ColorSpaceTag::Srgb => {
-                self.color = CurrentColor::Srgb(parsed.to_alpha_color::<Srgb>());
-                if text.contains("rgb") {
-                    self.color_mode = ColorMode::Rgb;
-                    self.mode_dropdown.selected = 1;
-                } else {
-                    self.color_mode = ColorMode::Hex;
-                    self.mode_dropdown.selected = 0;
-                }
-                Ok(())
+    fn parse_color(&mut self, text: String) -> Result<CurrentColor, String> {
+        let result = CurrentColor::from_code(&text);
+        if let Ok(result) = &result {
+            match result {
+                CurrentColor::SrgbHex(_) => self.mode_dropdown.selected = 0,
+                CurrentColor::Srgb(_) => self.mode_dropdown.selected = 1,
+                CurrentColor::Oklch(_) => self.mode_dropdown.selected = 2,
             }
-            ColorSpaceTag::Oklch => {
-                self.color = CurrentColor::Oklch(parsed.to_alpha_color::<Oklch>());
-                self.color_mode = ColorMode::Oklch;
-                self.mode_dropdown.selected = 2;
-                Ok(())
-            }
-            _ => Err("Unsupported color space".to_string()),
         }
+        result
     }
 
     fn contrast_color(&self) -> Color {
@@ -325,6 +349,14 @@ impl State {
         let saved_state = SavedState {
             text: self.color_code.clone(),
             dark_mode: Some(self.dark_mode),
+            palette: self
+                .palette
+                .colors
+                .iter()
+                .map(|color| color.as_ref().map(|color| color.to_code()))
+                .collect::<Vec<_>>()
+                .try_into()
+                .ok(),
         };
         let redraw = app.redraw_trigger();
         app.spawn(async move {
@@ -408,7 +440,6 @@ impl State {
             paste_button: ButtonState::default(),
             light_dark_mode_button: ButtonState::default(),
             color: CurrentColor::Oklch(AlphaColor::<Oklch>::new([1.0, 0.0, 0.0, 1.0])),
-            color_mode: ColorMode::Hex,
             mode_dropdown: DropdownState::default(),
             component_fields: [
                 TextState::default(),
@@ -421,6 +452,7 @@ impl State {
             update_status: Arc::new(Mutex::new(auto_update::UpdateStatus::Idle)),
             saved_state: Arc::new(Mutex::new(None)),
             update_button: ButtonState::default(),
+            palette: PaletteState::default(),
         };
         s.sync_component_fields();
         s.update_text();
@@ -440,81 +472,97 @@ fn main() {
                     10.,
                     vec![
                         row(vec![space().height(0.), update_button()]),
-                        stack(vec![
-                            rect(id!())
-                                .fill(s.color.display())
-                                .stroke(s.theme(Theme::Gray50), 1.)
-                                .corner_rounding(10.)
-                                .view()
-                                .finish(),
-                            text(id!(), s.color_code.clone())
-                                .font_size(match s.color_mode {
-                                    ColorMode::Hex | ColorMode::Rgb => 30,
-                                    ColorMode::Oklch => 25,
-                                })
-                                .font_weight(FontWeight::BOLD)
-                                .fill(s.contrast_color())
-                                .view()
-                                .transition_duration(0.)
-                                .finish(),
-                            column(vec![
-                                row_spaced_aligned(
-                                    10.,
-                                    Align::Top,
-                                    vec![
-                                        app_button(
-                                            id!(),
-                                            binding!(State, light_dark_mode_button),
-                                            6.,
-                                            if s.dark_mode {
-                                                include_str!("assets/sun.svg")
-                                            } else {
-                                                include_str!("assets/moon.svg")
-                                            },
-                                            |state, app| {
-                                                state.dark_mode = !state.dark_mode;
-                                                state.save_state(app);
-                                            },
-                                        ),
-                                        space().height(0.),
-                                        mode_toggle_button(),
-                                    ],
-                                ),
-                                space(),
-                                row_spaced(
+                        row_spaced(
+                            10.,
+                            vec![
+                                column_spaced(
                                     10.,
                                     vec![
-                                        app_button(
-                                            id!(),
-                                            binding!(State, paste_button),
-                                            6.,
-                                            include_str!("assets/paste.svg"),
-                                            |state, app| {
-                                                state.paste(app);
-                                            },
-                                        ),
-                                        space().height(0.),
-                                        if let Some(error) = s.error.blocking_lock().clone() {
-                                            text(id!(), error).fill(s.contrast_color()).finish()
-                                        } else {
-                                            empty()
-                                        },
-                                        space().height(0.),
-                                        app_button(
-                                            id!(),
-                                            binding!(State, copy_button),
-                                            8.,
-                                            include_str!("assets/copy.svg"),
-                                            |state, _app| {
-                                                state.copy();
-                                            },
-                                        ),
+                                        stack(vec![
+                                            rect(id!())
+                                                .fill(s.color.display())
+                                                .stroke(s.theme(Theme::Gray50), 1.)
+                                                .corner_rounding(10.)
+                                                .view()
+                                                .finish(),
+                                            text(id!(), s.color_code.clone())
+                                                .font_size(match s.color {
+                                                    CurrentColor::SrgbHex(_)
+                                                    | CurrentColor::Srgb(_) => 30,
+                                                    CurrentColor::Oklch(_) => 25,
+                                                })
+                                                .font_weight(FontWeight::BOLD)
+                                                .fill(s.contrast_color())
+                                                .view()
+                                                .transition_duration(0.)
+                                                .finish(),
+                                            column(vec![
+                                                row_spaced_aligned(
+                                                    10.,
+                                                    Align::Top,
+                                                    vec![
+                                                        app_button(
+                                                            id!(),
+                                                            binding!(State, light_dark_mode_button),
+                                                            6.,
+                                                            if s.dark_mode {
+                                                                include_str!("assets/sun.svg")
+                                                            } else {
+                                                                include_str!("assets/moon.svg")
+                                                            },
+                                                            |state, app| {
+                                                                state.dark_mode = !state.dark_mode;
+                                                                state.save_state(app);
+                                                            },
+                                                        ),
+                                                        space().height(0.),
+                                                        mode_toggle_button(),
+                                                    ],
+                                                ),
+                                                space(),
+                                                row_spaced(
+                                                    10.,
+                                                    vec![
+                                                        app_button(
+                                                            id!(),
+                                                            binding!(State, paste_button),
+                                                            6.,
+                                                            include_str!("assets/paste.svg"),
+                                                            |state, app| {
+                                                                state.paste(app);
+                                                            },
+                                                        ),
+                                                        space().height(0.),
+                                                        if let Some(error) =
+                                                            s.error.blocking_lock().clone()
+                                                        {
+                                                            text(id!(), error)
+                                                                .fill(s.contrast_color())
+                                                                .finish()
+                                                        } else {
+                                                            empty()
+                                                        },
+                                                        space().height(0.),
+                                                        app_button(
+                                                            id!(),
+                                                            binding!(State, copy_button),
+                                                            8.,
+                                                            include_str!("assets/copy.svg"),
+                                                            |state, _app| {
+                                                                state.copy();
+                                                            },
+                                                        ),
+                                                    ],
+                                                ),
+                                            ])
+                                            .pad(5.),
+                                        ]),
+                                        color_component_sliders(),
                                     ],
                                 ),
-                            ])
-                            .pad(5.),
-                        ]),
-                        color_component_sliders(),
+                                palette_grid(),
+                            ],
+                        ),
                     ],
                 )
                 .pad(10.)
@@ -532,13 +580,27 @@ fn main() {
             if let Some(dark_mode) = saved.dark_mode {
                 state.dark_mode = dark_mode;
             }
+            if let Some(ref palette) = saved.palette {
+                let colors: Result<[Option<CurrentColor>; PALETTE_SIZE], _> = palette
+                    .iter()
+                    .map(|color_opt| {
+                        color_opt
+                            .as_ref()
+                            .and_then(|color| CurrentColor::from_code(color).ok())
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into();
+                if let Ok(colors) = colors {
+                    state.palette.colors = colors;
+                }
+            }
             state.update_text();
             state.sync_component_fields();
             *state.saved_state.blocking_lock() = None;
         }
     })
     .title("idle-hue")
-    .inner_size(350, 250)
+    .inner_size(450, 250)
     .icon(include_bytes!("assets/icon32.png"))
     .start()
 }
@@ -574,35 +636,15 @@ fn app_button(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ColorMode {
-    Hex,
-    Rgb,
-    Oklch,
-}
-
-impl ColorMode {
-    fn to_string(self) -> &'static str {
-        match self {
-            ColorMode::Hex => "hex",
-            ColorMode::Rgb => "rgb",
-            ColorMode::Oklch => "oklch",
-        }
-    }
-    fn cases() -> Vec<ColorMode> {
-        vec![ColorMode::Hex, ColorMode::Rgb, ColorMode::Oklch]
-    }
-}
-
 fn mode_toggle_button() -> Node<State, AppState<State>> {
     dynamic(|s: &mut State, _app| {
         dropdown(
             id!(),
             binding!(State, mode_dropdown),
-            ColorMode::cases()
+            ["hex", "rgb", "oklch"]
                 .iter()
                 .enumerate()
-                .map(|(index, mode)| text(id!(index as u64), mode.to_string()))
+                .map(|(index, mode)| text(id!(index as u64), mode))
                 .collect(),
         )
         .corner_rounding(7.)
@@ -610,16 +652,15 @@ fn mode_toggle_button() -> Node<State, AppState<State>> {
         .text_fill(s.theme_inverted(Theme::Gray0))
         .highlight_fill(s.theme(Theme::Gray70))
         .on_select(|s, app, selection| {
-            let selection = ColorMode::cases().remove(selection);
-            match &selection {
-                ColorMode::Hex | ColorMode::Rgb => {
+            match selection {
+                0 | 1 => {
                     s.oklch_to_rgb();
                 }
-                ColorMode::Oklch => {
+                2 => {
                     s.rgb_to_oklch();
                 }
+                _ => {}
             }
-            s.color_mode = selection;
             s.sync_component_fields();
             s.update_text();
             s.save_state(app);
@@ -665,15 +706,16 @@ fn color_component_sliders() -> Node<State, AppState<State>> {
                             .background_padding(5.)
                             .on_edit(move |s, app, edit| match edit {
                                 EditInteraction::Update(new) => {
-                                    match s.color_mode {
-                                        ColorMode::Hex | ColorMode::Rgb => {
+                                    match s.color {
+                                        CurrentColor::SrgbHex(mut color)
+                                        | CurrentColor::Srgb(mut color) => {
                                             if let Ok(value) = new.parse::<u8>() {
-                                                s.color.components_mut()[i] = value as f32 / 255.;
+                                                color.components[i] = value as f32 / 255.;
                                             }
                                         }
-                                        ColorMode::Oklch => {
+                                        CurrentColor::Oklch(mut color) => {
                                             if let Ok(value) = new.parse::<f32>() {
-                                                s.color.components_mut()[i] = value;
+                                                color.components[i] = value;
                                             }
                                         }
                                     }
@@ -850,4 +892,170 @@ fn update_button() -> Node<State, AppState<State>> {
             .finish()
             .height(10.)
     })
+}
+
+fn palette_grid() -> Node<State, AppState<State>> {
+    dynamic(|s: &mut State, _app| {
+        let rows = (0..PALETTE_HEIGHT)
+            .map(|row| {
+                let cols = (0..PALETTE_WIDTH)
+                    .map(|col| {
+                        let index = row * PALETTE_WIDTH + col;
+                        let palette_color_str =
+                            s.palette.colors[index].as_ref().map(|c| c.display());
+                        let is_dragging = s.palette.dragging == Some(index);
+                        let is_drag_target =
+                            s.palette.drag_target == Some(index) && s.palette.dragging.is_some();
+
+                        stack(vec![
+                            palette_swatch(
+                                index,
+                                palette_color_str,
+                                is_dragging,
+                                is_drag_target,
+                                s,
+                            ),
+                            palette_sensor(index),
+                            svg(id!(index as u64), include_str!("assets/plus.svg"))
+                                .fill(
+                                    if palette_color_str.is_none()
+                                        && s.palette.hover[index]
+                                        && !is_dragging
+                                    {
+                                        s.theme_inverted(Theme::Gray0)
+                                    } else {
+                                        TRANSPARENT
+                                    },
+                                )
+                                .finish()
+                                .height(15.)
+                                .width(15.),
+                        ])
+                        .height(20.)
+                        .width(20.)
+                    })
+                    .collect::<Vec<_>>();
+
+                row_spaced(5., cols)
+            })
+            .collect::<Vec<_>>();
+
+        column_spaced(5., rows).attach_under(
+            rect(id!())
+                .fill(Color::TRANSPARENT)
+                .view()
+                .on_hover(move |state: &mut State, _app, hovered| {
+                    if state.palette.dragging.is_some() && !hovered {
+                        state.palette.drag_target = None;
+                    }
+                })
+                .finish(),
+        )
+    })
+}
+
+fn palette_swatch(
+    index: usize,
+    palette_color_str: Option<Color>,
+    is_dragging: bool,
+    is_drag_target: bool,
+    s: &mut State,
+) -> Node<State, AppState<State>> {
+    rect(id!(index as u64))
+        .fill(palette_color_str.unwrap_or(s.theme(Theme::Gray30)))
+        .stroke(
+            if is_drag_target {
+                s.theme_inverted(Theme::Gray0)
+            } else {
+                s.theme(Theme::Gray50)
+            },
+            if is_dragging {
+                3.
+            } else if is_drag_target {
+                2.
+            } else {
+                1.
+            },
+        )
+        .corner_rounding(6.)
+        .view()
+        .z_index(if is_dragging { 1 } else { 0 })
+        .transition_duration(20.)
+        .finish()
+        .offset(
+            if is_dragging {
+                s.palette.drag_offset.x as f32
+            } else {
+                0.0
+            },
+            if is_dragging {
+                s.palette.drag_offset.y as f32
+            } else {
+                0.0
+            },
+        )
+}
+
+fn palette_sensor(index: usize) -> Node<State, AppState<State>> {
+    rect(id!(index as u64))
+        .fill(Color::TRANSPARENT)
+        .view()
+        .on_hover(move |state: &mut State, _app, hovered| {
+            state.palette.hover[index] = hovered;
+            if state.palette.dragging.is_some() && hovered {
+                state.palette.drag_target = Some(index);
+            }
+        })
+        .on_click(
+            move |state: &mut State, app, click_state, _click_location| {
+                if matches!(click_state, ClickState::Completed) {
+                    if let Some(palette_color) = state.palette.colors[index].clone() {
+                        state.color = palette_color;
+                        state.update_text();
+                        state.sync_component_fields();
+                        state.save_state(app);
+                    } else {
+                        state.palette.colors[index] = Some(state.color.clone());
+                        state.save_state(app);
+                    }
+                }
+            },
+        )
+        .on_drag(move |state: &mut State, app, drag| {
+            match drag {
+                DragState::Began { .. } => {
+                    if state.palette.colors[index].is_some() {
+                        state.palette.dragging = Some(index);
+                        state.palette.drag_offset = Point::ZERO;
+                    }
+                }
+                DragState::Updated { start, current, .. } => {
+                    if state.palette.dragging == Some(index) {
+                        state.palette.drag_offset =
+                            Point::new(current.x - start.x, current.y - start.y);
+                    }
+                }
+                DragState::Completed { .. } => {
+                    if let Some(dragging_index) = state.palette.dragging {
+                        if let Some(target_index) = state.palette.drag_target {
+                            // Swap colors
+                            let dragging_color = state.palette.colors[dragging_index].clone();
+                            let target_color = state.palette.colors[target_index].clone();
+                            state.palette.colors[dragging_index] = target_color;
+                            state.palette.colors[target_index] = dragging_color;
+                            state.save_state(app);
+                        } else {
+                            // Dragged outside palette - remove color
+                            state.palette.colors[dragging_index] = None;
+                            state.save_state(app);
+                        }
+
+                        state.palette.dragging = None;
+                        state.palette.drag_target = None;
+                        state.palette.drag_offset = Point::ZERO;
+                    }
+                }
+            }
+        })
+        .finish()
 }
