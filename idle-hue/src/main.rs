@@ -628,7 +628,7 @@ fn main() {
         }
     })
     .title("idle-hue")
-    .inner_size(375, 240)
+    .inner_size(390, 240)
     .icon(include_bytes!("assets/icon32.png"))
     .start()
 }
@@ -739,14 +739,14 @@ fn color_component_sliders() -> Node<State, AppState<State>> {
                             .background_padding(5.)
                             .on_edit(move |s, app, edit| match edit {
                                 EditInteraction::Update(new) => {
-                                    match s.color {
-                                        CurrentColor::SrgbHex(mut color)
-                                        | CurrentColor::Srgb(mut color) => {
+                                    match &mut s.color {
+                                        CurrentColor::SrgbHex(color)
+                                        | CurrentColor::Srgb(color) => {
                                             if let Ok(value) = new.parse::<u8>() {
                                                 color.components[i] = value as f32 / 255.;
                                             }
                                         }
-                                        CurrentColor::Oklch(mut color) => {
+                                        CurrentColor::Oklch(color) => {
                                             if let Ok(value) = new.parse::<f32>() {
                                                 color.components[i] = value;
                                             }
