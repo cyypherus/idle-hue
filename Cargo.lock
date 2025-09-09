@@ -274,6 +274,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "backer"
 version = "0.11.1"
+source = "git+https://github.com/cyypherus/backer?branch=mvp#20bb360261a339f6e937b4c7b645b8fd0bbae124"
 
 [[package]]
 name = "backtrace"
@@ -3923,6 +3924,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ui"
 version = "0.1.0"
+source = "git+https://github.com/cyypherus/ui?branch=mvp#c2103c47a374e8bdd9f64db0e6cef8747b4c71e1"
 dependencies = [
  "backer",
  "clipboard-rs",

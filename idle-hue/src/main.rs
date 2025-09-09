@@ -190,19 +190,45 @@ impl State {
         self.color_code = self.color.to_code()
     }
 
-    fn rgb_to_oklch(&mut self) {
-        if let CurrentColor::Srgb(color) = self.color {
-            self.color = CurrentColor::Oklch(color.convert::<Oklch>());
+    fn switch_to_rgb_hex(&mut self) {
+        match self.color {
+            CurrentColor::Srgb(color) => {
+                self.color = CurrentColor::SrgbHex(color);
+            }
+            CurrentColor::SrgbHex(color) => {
+                self.color = CurrentColor::SrgbHex(color);
+            }
+            CurrentColor::Oklch(color) => {
+                self.color = CurrentColor::SrgbHex(color.convert::<Srgb>());
+            }
         }
     }
 
-    fn oklch_to_rgb(&mut self) {
-        if let CurrentColor::Oklch(color) = self.color {
-            let mut converted = color.convert::<Srgb>();
-            converted.components[0] = converted.components[0].clamp(0.0, 1.0);
-            converted.components[1] = converted.components[1].clamp(0.0, 1.0);
-            converted.components[2] = converted.components[2].clamp(0.0, 1.0);
-            self.color = CurrentColor::Srgb(converted);
+    fn switch_to_rgb(&mut self) {
+        match self.color {
+            CurrentColor::Srgb(color) => {
+                self.color = CurrentColor::Srgb(color);
+            }
+            CurrentColor::SrgbHex(color) => {
+                self.color = CurrentColor::Srgb(color);
+            }
+            CurrentColor::Oklch(color) => {
+                self.color = CurrentColor::Srgb(color.convert::<Srgb>());
+            }
+        }
+    }
+
+    fn switch_to_oklch(&mut self) {
+        match self.color {
+            CurrentColor::Srgb(color) => {
+                self.color = CurrentColor::Oklch(color.convert::<Oklch>());
+            }
+            CurrentColor::SrgbHex(color) => {
+                self.color = CurrentColor::Oklch(color.convert::<Oklch>());
+            }
+            CurrentColor::Oklch(color) => {
+                self.color = CurrentColor::Oklch(color);
+            }
         }
     }
 
@@ -487,9 +513,9 @@ fn main() {
                                                 .finish(),
                                             text(id!(), s.color_code.clone())
                                                 .font_size(match s.color {
-                                                    CurrentColor::SrgbHex(_)
-                                                    | CurrentColor::Srgb(_) => 30,
-                                                    CurrentColor::Oklch(_) => 25,
+                                                    CurrentColor::SrgbHex(_) => 30,
+                                                    CurrentColor::Oklch(_)
+                                                    | CurrentColor::Srgb(_) => 25,
                                                 })
                                                 .font_weight(FontWeight::BOLD)
                                                 .fill(s.contrast_color())
@@ -576,7 +602,9 @@ fn main() {
     .on_frame(|state, _app| {
         let saved = state.saved_state.blocking_lock().clone();
         if let Some(ref saved) = saved {
-            _ = state.parse_color(saved.text.clone());
+            if let Ok(color) = state.parse_color(saved.text.clone()) {
+                state.color = color;
+            }
             if let Some(dark_mode) = saved.dark_mode {
                 state.dark_mode = dark_mode;
             }
@@ -600,7 +628,7 @@ fn main() {
         }
     })
     .title("idle-hue")
-    .inner_size(450, 250)
+    .inner_size(375, 240)
     .icon(include_bytes!("assets/icon32.png"))
     .start()
 }
@@ -616,6 +644,7 @@ fn app_button(
         let color = s.theme_inverted(Theme::Gray0);
         button(id!(id), binding.clone())
             .corner_rounding(7.)
+            .stroke(s.theme(Theme::Gray50), 1.)
             .fill(s.theme(Theme::Gray30))
             .label(move |_, button| {
                 svg(id!(id), icon)
@@ -649,15 +678,19 @@ fn mode_toggle_button() -> Node<State, AppState<State>> {
         )
         .corner_rounding(7.)
         .fill(s.theme(Theme::Gray30))
+        .stroke(s.theme(Theme::Gray50), 1.)
         .text_fill(s.theme_inverted(Theme::Gray0))
         .highlight_fill(s.theme(Theme::Gray70))
         .on_select(|s, app, selection| {
             match selection {
-                0 | 1 => {
-                    s.oklch_to_rgb();
+                0 => {
+                    s.switch_to_rgb_hex();
+                }
+                1 => {
+                    s.switch_to_rgb();
                 }
                 2 => {
-                    s.rgb_to_oklch();
+                    s.switch_to_oklch();
                 }
                 _ => {}
             }
@@ -903,16 +936,19 @@ fn palette_grid() -> Node<State, AppState<State>> {
                         let index = row * PALETTE_WIDTH + col;
                         let palette_color_str =
                             s.palette.colors[index].as_ref().map(|c| c.display());
-                        let is_dragging = s.palette.dragging == Some(index);
+                        let is_dragging_this_swatch = s.palette.dragging == Some(index);
+                        let is_dragging = s.palette.dragging.is_some();
                         let is_drag_target =
                             s.palette.drag_target == Some(index) && s.palette.dragging.is_some();
+                        let drag_target = s.palette.drag_target;
 
                         stack(vec![
                             palette_swatch(
                                 index,
                                 palette_color_str,
-                                is_dragging,
+                                is_dragging_this_swatch,
                                 is_drag_target,
+                                drag_target,
                                 s,
                             ),
                             palette_sensor(index),
@@ -959,6 +995,7 @@ fn palette_swatch(
     palette_color_str: Option<Color>,
     is_dragging: bool,
     is_drag_target: bool,
+    drag_target: Option<usize>,
     s: &mut State,
 ) -> Node<State, AppState<State>> {
     rect(id!(index as u64))
@@ -982,6 +1019,33 @@ fn palette_swatch(
         .z_index(if is_dragging { 1 } else { 0 })
         .transition_duration(20.)
         .finish()
+        .attach_over(
+            svg(id!(index as u64), include_str!("assets/x.svg"))
+                .fill(if drag_target.is_none() && is_dragging {
+                    s.theme_inverted(Theme::Gray0)
+                } else {
+                    TRANSPARENT
+                })
+                .view()
+                .z_index(1)
+                .transition_duration(20.)
+                .finish()
+                .height(15.)
+                .width(15.)
+                .attach_under(
+                    rect(id!(index as u64))
+                        .corner_rounding(4.)
+                        .fill(if drag_target.is_none() && is_dragging {
+                            s.theme(Theme::Gray30).with_alpha(0.5)
+                        } else {
+                            TRANSPARENT
+                        })
+                        .view()
+                        .z_index(1)
+                        .transition_duration(20.)
+                        .finish(),
+                ),
+        )
         .offset(
             if is_dragging {
                 s.palette.drag_offset.x as f32
@@ -1027,6 +1091,7 @@ fn palette_sensor(index: usize) -> Node<State, AppState<State>> {
                     if state.palette.colors[index].is_some() {
                         state.palette.dragging = Some(index);
                         state.palette.drag_offset = Point::ZERO;
+                        state.palette.drag_target = Some(index);
                     }
                 }
                 DragState::Updated { start, current, .. } => {
