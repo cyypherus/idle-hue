@@ -26,6 +26,12 @@ env_logger = "0.11.8"
 directories = "6.0.0"
 color = "0.3.1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+block2 = "0.6.1"
+objc2-app-kit = { version = "0.3.1", features = ["NSColorSampler", "NSColor", "NSColorSpace", "block2"] }
+objc2-foundation = "0.3.2"
+
 [package.metadata.bundle.bin.idle-hue]
 name = "idle-hue"
 identifier = "cyy.apps.idle-hue"

@@ -2,8 +2,10 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
 
+mod dropper;
+
 use arboard::Clipboard;
-use color::{AlphaColor, Oklch, Srgb};
+use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
 use haven::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -72,13 +74,17 @@ fn btn_label_color(btn: ButtonState, base: Color) -> Color {
 const SUN_ICON: &str = include_str!("assets/sun.svg");
 const MOON_ICON: &str = include_str!("assets/moon.svg");
 
+const DROPPER_ICON: &str = include_str!("assets/dropper.svg");
+
 struct State {
     values: [f32; 3],
     sliders: [SliderState; 3],
-    fields: [TextState; 3],
+    format_fields: [TextState; 3],
+    editing_format: Option<usize>,
     copy_buttons: [ButtonState; 3],
     dark_mode: bool,
     dark_mode_button: ButtonState,
+    dropper_button: ButtonState,
     copied: Arc<Mutex<[bool; 3]>>,
 }
 
@@ -156,10 +162,40 @@ impl State {
         [self.format_hex(), self.format_rgb(), self.format_oklch()]
     }
 
-    fn update_fields(&mut self) {
-        self.fields[0] = TextState::new(format!("{:.2}", self.values[0]));
-        self.fields[1] = TextState::new(format!("{:.3}", self.values[1]));
-        self.fields[2] = TextState::new(format!("{:.1}", self.values[2]));
+
+    fn update_format_fields(&mut self) {
+        let fmts = self.formats();
+        for i in 0..3 {
+            if self.editing_format == Some(i) {
+                continue;
+            }
+            let val = if i == 0 {
+                fmts[i].to_uppercase()
+            } else {
+                fmts[i].clone()
+            };
+            self.format_fields[i] = TextState::new(val);
+        }
+    }
+
+    fn parse_format(&mut self, text: &str) -> bool {
+        let input = text.trim();
+        let parsed = parse_color(input)
+            .ok()
+            .or_else(|| parse_color(&format!("#{input}")).ok());
+        let Some(parsed) = parsed else {
+            return false;
+        };
+        let oklch: AlphaColor<Oklch> = match parsed.cs {
+            ColorSpaceTag::Oklch => parsed.to_alpha_color(),
+            _ => {
+                let srgb: AlphaColor<Srgb> = parsed.to_alpha_color();
+                srgb.convert()
+            }
+        };
+        let c = oklch.components;
+        self.values = [c[0], c[1], c[2]];
+        true
     }
 
     fn update_sliders(&mut self) {
@@ -169,7 +205,7 @@ impl State {
     }
 
     fn update_ui(&mut self) {
-        self.update_fields();
+        self.update_format_fields();
         self.update_sliders();
     }
 }
@@ -179,10 +215,12 @@ impl Default for State {
         let mut s = Self {
             values: [0.7, 0.15, 180.0],
             sliders: Default::default(),
-            fields: Default::default(),
+            format_fields: Default::default(),
+            editing_format: None,
             copy_buttons: Default::default(),
             dark_mode: true,
             dark_mode_button: Default::default(),
+            dropper_button: Default::default(),
             copied: Arc::new(Mutex::new([false; 3])),
         };
         s.update_ui();
@@ -205,6 +243,16 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
     let field_bg = s.theme(Theme::Gray30);
     let field_border = s.theme(Theme::Gray50);
     let label_color = s.theme_inverted(Theme::Gray0);
+    let highlight_color = {
+        let luminance = s.display_color().discard_alpha().relative_luminance();
+        let range = if s.dark_mode { 0.1..1. } else { 0.0..0.9 };
+        if !range.contains(&luminance) {
+            s.theme_inverted(Theme::Gray0)
+        } else {
+            s.display_color()
+        }
+    }
+    .with_alpha(0.5);
 
     stack(vec![
         rect(id!()).fill(bg).corner_rounding(0.).build(app.ctx()),
@@ -215,6 +263,46 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                     10.,
                     vec![
                         space().inert_y(),
+                        button(
+                            id!(),
+                            (
+                                s.dropper_button,
+                                Binding::new(
+                                    |s: &State| s.dropper_button,
+                                    |s: &mut State, v| s.dropper_button = v,
+                                ),
+                            ),
+                        )
+                        .surface(move |btn, ctx| {
+                            rect(id!())
+                                .fill(btn_surface_color(btn, field_bg))
+                                .stroke(field_border, Stroke::new(1.))
+                                .corner_rounding(7.)
+                                .build(ctx)
+                        })
+                        .label(move |btn, ctx| {
+                            svg(id!(), DROPPER_ICON)
+                                .fill(Brush::Solid(btn_label_color(btn, label_color)))
+                                .finish(ctx)
+                                .pad(6.)
+                        })
+                        .on_click(|_state, app: &mut AppState| {
+                            let tx = app.callback(|state: &mut State, rgb: [f32; 3]| {
+                                let srgb = AlphaColor::<Srgb>::new([rgb[0], rgb[1], rgb[2], 1.0]);
+                                let oklch: AlphaColor<Oklch> = srgb.convert();
+                                let c = oklch.components;
+                                state.values = [c[0], c[1], c[2]];
+                                state.update_ui();
+                            });
+                            app.spawn(async move {
+                                if let Ok(Some(rgb)) = dropper::sample_color().await {
+                                    tx.send(rgb);
+                                }
+                            });
+                        })
+                        .build(app.ctx())
+                        .height(30.)
+                        .width(30.),
                         button(
                             id!(),
                             (
@@ -254,84 +342,139 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                             .stroke(field_border, Stroke::new(1.))
                             .corner_rounding(8.)
                             .build(app.ctx()),
-                        column_spaced(
-                            10.,
-                            (0..3)
-                                .map(|i| {
-                                    let copied = s.copied.try_lock().map(|c| c[i]).unwrap_or(false);
-                                    let label = if copied {
-                                        "copied".to_string()
-                                    } else {
-                                        match i {
-                                            0 => s.format_hex().to_uppercase(),
-                                            1 => "RGB".to_string(),
-                                            _ => "OKLCH".to_string(),
-                                        }
-                                    };
-                                    let copied_state = s.copied.clone();
-                                    button(
-                                        id!(i as u64),
-                                        (
-                                            s.copy_buttons[i],
-                                            Binding::new(
-                                                move |s: &State| s.copy_buttons[i],
-                                                move |s: &mut State, v| s.copy_buttons[i] = v,
-                                            ),
-                                        ),
-                                    )
-                                    .surface(move |btn, ctx| {
-                                        rect(id!(i as u64))
-                                            .fill(btn_surface_color(btn, s.theme(Theme::Gray30)))
-                                            .stroke(s.display_color(), Stroke::new(1.))
-                                            .corner_rounding(6.)
-                                            .build(ctx)
-                                    })
-                                    .label(move |btn, ctx| {
-                                        let c = btn_label_color(btn, label_color);
-                                        row_spaced(
-                                            6.,
-                                            vec![
-                                                text(id!(i as u64), &label)
-                                                    .font_size(16)
-                                                    .fill(c)
-                                                    .build(ctx),
+                        row_spaced(
+                            6.,
+                            vec![
+                                column_spaced(
+                                    10.,
+                                    (0..3)
+                                        .map(|i| {
+                                            text_field(
+                                                id!(i as u64),
+                                                (
+                                                    s.format_fields[i].clone(),
+                                                    Binding::new(
+                                                        move |s: &State| {
+                                                            s.format_fields[i].clone()
+                                                        },
+                                                        move |s: &mut State, v| {
+                                                            s.format_fields[i] = v
+                                                        },
+                                                    ),
+                                                ),
+                                            )
+                                            .font_size(16)
+                                            .text_fill(label_color)
+                                            .cursor_fill(label_color)
+                                            .highlight_fill(highlight_color)
+                                            .enter_end_editing()
+                                            .esc_end_editing()
+                                            .on_edit(move |state, _, edit| match edit {
+                                                EditInteraction::Update(text) => {
+                                                    state.editing_format = Some(i);
+                                                    if state.parse_format(&text) {
+                                                        state.update_ui();
+                                                    }
+                                                }
+                                                EditInteraction::End => {
+                                                    state.editing_format = None;
+                                                    state.update_ui();
+                                                }
+                                            })
+                                            .background(move |_, _, ctx| {
+                                                rect(id!(i as u64))
+                                                    .fill(s.theme(Theme::Gray30))
+                                                    .stroke(
+                                                        s.display_color(),
+                                                        Stroke::new(1.),
+                                                    )
+                                                    .corner_rounding(6.)
+                                                    .build(ctx)
+                                            })
+                                            .padding(5.)
+                                            .build(app.ctx())
+                                            .expand_x()
+                                            .height(30.)
+                                        })
+                                        .collect(),
+                                )
+                                .expand_x(),
+                                column_spaced(
+                                    10.,
+                                    (0..3)
+                                        .map(|i| {
+                                            let copied =
+                                                s.copied.try_lock().map(|c| c[i]).unwrap_or(false);
+                                            let copied_state = s.copied.clone();
+                                            button(
+                                                id!(i as u64),
+                                                (
+                                                    s.copy_buttons[i],
+                                                    Binding::new(
+                                                        move |s: &State| s.copy_buttons[i],
+                                                        move |s: &mut State, v| {
+                                                            s.copy_buttons[i] = v
+                                                        },
+                                                    ),
+                                                ),
+                                            )
+                                            .surface(move |btn, ctx| {
+                                                rect(id!(i as u64))
+                                                    .fill(btn_surface_color(
+                                                        btn,
+                                                        s.theme(Theme::Gray30),
+                                                    ))
+                                                    .stroke(
+                                                        s.display_color(),
+                                                        Stroke::new(1.),
+                                                    )
+                                                    .corner_rounding(6.)
+                                                    .build(ctx)
+                                            })
+                                            .label(move |btn, ctx| {
+                                                let c = btn_label_color(btn, label_color);
                                                 if copied {
                                                     svg(id!(i as u64), CHECKMARK_ICON)
                                                         .fill(Brush::Solid(c))
                                                         .finish(ctx)
                                                         .width(14.)
                                                         .height(14.)
+                                                        .pad(5.)
                                                 } else {
                                                     svg(id!(i as u64), COPY_ICON)
                                                         .fill(Brush::Solid(c))
                                                         .finish(ctx)
                                                         .width(14.)
                                                         .height(14.)
-                                                },
-                                            ],
-                                        )
-                                        .pad(5.)
-                                    })
-                                    .on_click(move |state, app| {
-                                        let text = state.formats()[i].clone();
-                                        if let Ok(mut cb) = Clipboard::new() {
-                                            let _ = cb.set_text(text);
-                                        }
-                                        if let Ok(mut c) = copied_state.try_lock() {
-                                            c[i] = true;
-                                        }
-                                        let copied_reset = copied_state.clone();
-                                        let redraw = app.redraw_trigger();
-                                        app.spawn(async move {
-                                            tokio::time::sleep(tokio::time::Duration::from_secs(2))
-                                                .await;
-                                            copied_reset.lock().await[i] = false;
-                                            redraw.trigger().await;
-                                        });
-                                    })
-                                    .build(app.ctx())
-                                })
-                                .collect(),
+                                                        .pad(5.)
+                                                }
+                                            })
+                                            .on_click(move |state, app| {
+                                                let text = state.formats()[i].clone();
+                                                if let Ok(mut cb) = Clipboard::new() {
+                                                    let _ = cb.set_text(text);
+                                                }
+                                                if let Ok(mut c) = copied_state.try_lock() {
+                                                    c[i] = true;
+                                                }
+                                                let copied_reset = copied_state.clone();
+                                                let redraw = app.redraw_trigger();
+                                                app.spawn(async move {
+                                                    tokio::time::sleep(
+                                                        tokio::time::Duration::from_secs(2),
+                                                    )
+                                                    .await;
+                                                    copied_reset.lock().await[i] = false;
+                                                    redraw.trigger().await;
+                                                });
+                                            })
+                                            .build(app.ctx())
+                                            .width(30.)
+                                            .height(30.)
+                                        })
+                                        .collect(),
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -362,32 +505,14 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                         id!(i as u64),
                                         i,
                                         binding!(s, State, sliders),
-                                        s.theme(Theme::Gray30),
+                                        s.values,
                                         s.theme_inverted(Theme::Gray0),
-                                        s.theme(Theme::Gray50),
-                                        s.theme(Theme::Gray70),
                                         app,
                                     )
                                 })
                                 .collect(),
                         )
                         .width_range(200.0..),
-                        column_spaced(
-                            8.,
-                            (0..3)
-                                .map(|i| {
-                                    channel_field(
-                                        id!(i as u64),
-                                        i,
-                                        binding!(s, State, fields),
-                                        label_color,
-                                        field_bg,
-                                        field_border,
-                                        app,
-                                    )
-                                })
-                                .collect(),
-                        ),
                     ],
                 ),
             ],
@@ -400,13 +525,21 @@ fn channel_slider<'a>(
     key: u64,
     i: usize,
     binding: ([SliderState; 3], Binding<State, [SliderState; 3]>),
-    background_color: Color,
+    values: [f32; 3],
     knob_color: Color,
-    track_color: Color,
-    traveled_track_color: Color,
     app: &mut AppState,
 ) -> Layout<'a, View<State>, AppCtx> {
     let ch = &CHANNELS[i];
+    let stops: Vec<Color> = (0..=16)
+        .map(|step| {
+            let t = step as f32 / 16.0;
+            let val = ch.min + t * (ch.max - ch.min);
+            let mut v = values;
+            v[i] = val;
+            let oklch = AlphaColor::<Oklch>::new([v[0], v[1], v[2], 1.0]);
+            oklch.convert::<Srgb>()
+        })
+        .collect();
     slider(
         id!(key),
         (
@@ -420,19 +553,25 @@ fn channel_slider<'a>(
     .range(ch.min, ch.max)
     .background(move |_, area, ctx| {
         rect(id!(key))
-            .fill(background_color)
+            .fill(
+                Gradient::new_linear(
+                    (area.x as f64, area.y as f64),
+                    (area.x as f64 + area.width as f64, area.y as f64),
+                )
+                .with_stops(stops.as_slice()),
+            )
             .corner_rounding(area.height)
             .build(ctx)
     })
     .track(move |_, area, ctx| {
         rect(id!(key))
-            .fill(track_color)
+            .fill(Color::TRANSPARENT)
             .corner_rounding(area.height)
             .build(ctx)
     })
     .traveled_track(move |_, area, ctx| {
         rect(id!(key))
-            .fill(traveled_track_color)
+            .fill(Color::TRANSPARENT)
             .corner_rounding(area.height)
             .build(ctx)
     })
@@ -456,53 +595,4 @@ fn channel_slider<'a>(
     .pad_y(2.)
 }
 
-fn channel_field<'a>(
-    key: u64,
-    i: usize,
-    binding: ([TextState; 3], Binding<State, [TextState; 3]>),
-    label_color: Color,
-    field_bg: Color,
-    field_border: Color,
-    app: &mut AppState,
-) -> Layout<'a, View<State>, AppCtx> {
-    let ch = &CHANNELS[i];
-    let min = ch.min;
-    let max = ch.max;
-    stack(vec![
-        text_field(
-            id!(key),
-            (
-                binding.0[i].clone(),
-                Binding::new(
-                    move |s: &State| s.fields[i].clone(),
-                    move |s: &mut State, v| s.fields[i] = v,
-                ),
-            ),
-        )
-        .font_size(16)
-        .text_fill(label_color)
-        .enter_end_editing()
-        .esc_end_editing()
-        .on_edit(move |state, _, edit| match edit {
-            EditInteraction::Update(t) => {
-                if let Ok(v) = t.parse::<f32>() {
-                    state.values[i] = v.clamp(min, max);
-                    state.update_sliders();
-                }
-            }
-            EditInteraction::End => state.update_ui(),
-        })
-        .background(move |_, _, ctx| {
-            rect(id!(key))
-                .fill(field_bg)
-                .stroke(field_border, Stroke::new(1.))
-                .corner_rounding(4.)
-                .build(ctx)
-        })
-        .build(app.ctx())
-        .height(26.)
-        .expand_x(),
-    ])
-    .expand_x()
-    .pad_y(2.)
-}
+
