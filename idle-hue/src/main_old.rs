@@ -540,9 +540,10 @@ fn main() {
                 *state.saved_state.blocking_lock() = None;
             }
         })
-        .title("idle-hue")
-        .inner_size(390, 240)
-        .icon(include_bytes!("assets/icon32.png"))
+        .attributes(|a| {
+            a.with_title("idle-hue")
+                .with_inner_size(winit::dpi::LogicalSize::new(390u32, 240u32))
+        })
         .start()
 }
 
