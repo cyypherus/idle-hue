@@ -8,7 +8,7 @@ prod = []
 
 [dependencies]
 # ui = { git = "https://github.com/cyypherus/ui", branch = "mvp" }
-ui = { path = "../../ui" }
+haven = { path = "../../haven" }
 arboard = "3.4"
 serde = { workspace = true }
 serde_json = { workspace = true }

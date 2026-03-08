@@ -4,9 +4,9 @@
 
 use arboard::Clipboard;
 use color::{AlphaColor, Oklch, Srgb};
+use haven::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use ui::*;
 
 const GRAY_0_D: Color = Color::from_rgb8(0x00, 0x00, 0x00);
 const GRAY_30_D: Color = Color::from_rgb8(0x1e, 0x1e, 0x1e);
