@@ -1,14 +1,13 @@
 use anyhow::Result;
 use semver::Version;
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use version_api_client::VersionServerClient;
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 const APP_NAME: &str = "idle-hue";
 
@@ -16,7 +15,6 @@ const APP_NAME: &str = "idle-hue";
 pub enum UpdateStatus {
     Idle,
     Checking,
-
     UpToDate { version: Version },
     Downloading { version: Version },
     Installing { version: Version },
@@ -207,6 +205,7 @@ impl AutoUpdater {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
     fn find_app_bundle(exe_path: &Path) -> Result<PathBuf> {
         let mut current = exe_path;
         let mut levels = 0;
