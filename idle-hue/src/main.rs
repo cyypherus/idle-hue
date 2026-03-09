@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod auto_update;
+#[cfg(not(target_os = "windows"))]
 mod dropper;
 
 use arboard::Clipboard;
@@ -51,7 +52,6 @@ const GRAY_30_L: Color = Color::from_rgb8(0xea, 0xe4, 0xe6);
 const GRAY_50_L: Color = Color::from_rgb8(0xd9, 0xd2, 0xd4);
 const GRAY_70_L: Color = Color::from_rgb8(0xb6, 0xb6, 0xb8);
 
-#[allow(dead_code)]
 enum Theme {
     Gray0,
     Gray30,
@@ -111,6 +111,7 @@ fn btn_label_color(btn: ButtonState, base: Color) -> Color {
 const SUN_ICON: &str = include_str!("assets/sun.svg");
 const MOON_ICON: &str = include_str!("assets/moon.svg");
 
+#[cfg(not(target_os = "windows"))]
 const DROPPER_ICON: &str = include_str!("assets/dropper.svg");
 
 struct State {
@@ -121,6 +122,7 @@ struct State {
     copy_buttons: [ButtonState; 3],
     dark_mode: bool,
     dark_mode_button: ButtonState,
+    #[cfg(not(target_os = "windows"))]
     dropper_button: ButtonState,
     update_button: ButtonState,
     update_status: UpdateStatus,
@@ -281,6 +283,7 @@ impl Default for State {
             copy_buttons: Default::default(),
             dark_mode: true,
             dark_mode_button: Default::default(),
+            #[cfg(not(target_os = "windows"))]
             dropper_button: Default::default(),
             update_button: Default::default(),
             update_status: UpdateStatus::Idle,
@@ -369,10 +372,11 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
             column_spaced(
                 10.,
                 vec![
-                    row_spaced(
-                        10.,
-                        vec![
-                            space().inert_y(),
+                    row_spaced(10., {
+                        let mut buttons: Vec<Layout<'_, View<State>, AppCtx>> =
+                            vec![space().inert_y()];
+                        #[cfg(not(target_os = "windows"))]
+                        buttons.push(
                             button(
                                 id!(),
                                 (
@@ -414,6 +418,8 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                             .build(app.ctx())
                             .height(30.)
                             .width(30.),
+                        );
+                        buttons.push(
                             button(
                                 id!(),
                                 (
@@ -443,8 +449,9 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                             .build(app.ctx())
                             .height(30.)
                             .width(30.),
-                        ],
-                    ),
+                        );
+                        buttons
+                    }),
                     row_spaced(
                         10.,
                         vec![
@@ -536,7 +543,7 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                                             btn,
                                                             s.theme(Theme::Gray30),
                                                         ))
-                                                        .stroke(s.display_color(), Stroke::new(1.))
+                                                        .stroke(field_border, Stroke::new(1.))
                                                         .corner_rounding(6.)
                                                         .build(ctx)
                                                 })
@@ -658,7 +665,7 @@ fn update_button<'a>(
         UpdateStatus::Downloading { .. } => "downloading...".to_string(),
         UpdateStatus::Installing { .. } => "installing...".to_string(),
         UpdateStatus::Updated { .. } => "restart to update".to_string(),
-        UpdateStatus::UpToDate { .. } => "up to date".to_string(),
+        UpdateStatus::UpToDate { .. } => "up to date :)".to_string(),
         UpdateStatus::Error(msg) => {
             if msg.len() > 30 {
                 format!("{}...", &msg[..27])

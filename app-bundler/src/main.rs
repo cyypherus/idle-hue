@@ -18,6 +18,9 @@ struct Args {
     /// Skip Apple code signing and notarization
     #[arg(long)]
     skip_codesign: bool,
+    /// Skip building, use existing artifacts
+    #[arg(long)]
+    skip_build: bool,
     /// Only build and upload specific platforms (comma-separated: macos-arm,macos-intel,windows)
     #[arg(long, value_delimiter = ',')]
     platforms: Option<Vec<String>>,
@@ -45,43 +48,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ]
     });
 
-    // Build selected targets
-    build_targets(&project_root, &platforms, args.upload_prod)?;
+    if !args.skip_build {
+        build_targets(&project_root, &platforms, args.upload_prod)?;
 
-    // Create zip files in target directory
-    let mut zip_paths = create_zip_files(&project_root, &platforms)?;
+        let mut zip_paths = create_zip_files(&project_root, &platforms)?;
 
-    // Sign and notarize macOS apps if signing credentials are available and not skipped
-    if !args.skip_codesign {
-        if let (Ok(_), Ok(_), Ok(_)) = (
-            env::var("APPLE_TEAM_ID"),
-            env::var("APPLE_ID"),
-            env::var("APPLE_APP_SPECIFIC_PASSWORD"),
-        ) {
-            println!("Signing credentials found, processing macOS apps...");
-            sign_and_notarize_macos_apps(&project_root, &mut zip_paths, &platforms)?;
+        if !args.skip_codesign {
+            if let (Ok(_), Ok(_), Ok(_)) = (
+                env::var("APPLE_TEAM_ID"),
+                env::var("APPLE_ID"),
+                env::var("APPLE_APP_SPECIFIC_PASSWORD"),
+            ) {
+                println!("Signing credentials found, processing macOS apps...");
+                sign_and_notarize_macos_apps(&project_root, &mut zip_paths, &platforms)?;
+            } else {
+                println!("Skipping code signing - Apple credentials not set in .env");
+            }
         } else {
-            println!("Skipping code signing - Apple credentials not set in .env");
+            println!("Skipping code signing - --skip-codesign flag provided");
         }
-    } else {
-        println!("Skipping code signing - --skip-codesign flag provided");
-    }
 
-    // Upload using CLI if environment variables are set and not skipped
-    if args.skip_upload {
-        println!("Skipping upload - --skip-upload flag provided");
-        println!("Created zip files:");
+        if args.skip_upload {
+            println!("Skipping upload - --skip-upload flag provided");
+            println!("Created zip files:");
+            for (platform, path) in &zip_paths {
+                println!("  {}: {}", platform, path.display());
+            }
+        } else if env::var("VERSION_SERVER_API_KEY").ok().is_some() {
+            println!("Uploading to version server...");
+            upload_to_server(&project_root, &version, &zip_paths, args.upload_prod)?;
+        } else {
+            println!("Skipping upload - VERSION_SERVER_API_KEY not set");
+            println!("Created zip files:");
+            for (platform, path) in &zip_paths {
+                println!("  {}: {}", platform, path.display());
+            }
+        }
+    } else {
+        println!("Skipping build, using existing artifacts...");
+        let target_dir = project_root.join("target");
+        let zip_map: &[(&str, &str)] = &[
+            ("macos-arm", "idle-hue-macos-arm.zip"),
+            ("macos-intel", "idle-hue-macos-intel.zip"),
+            ("windows-x86_64-gnu", "idle-hue-windows-x86_64-gnu.zip"),
+        ];
+        let zip_paths: Vec<(String, PathBuf)> = zip_map
+            .iter()
+            .map(|(platform, file)| (platform.to_string(), target_dir.join(file)))
+            .filter(|(_, path)| path.exists())
+            .collect();
+
+        if zip_paths.is_empty() {
+            return Err("No existing zip artifacts found in target/".into());
+        }
+
+        println!("Found existing artifacts:");
         for (platform, path) in &zip_paths {
             println!("  {}: {}", platform, path.display());
         }
-    } else if env::var("VERSION_SERVER_API_KEY").ok().is_some() {
-        println!("Uploading to version server...");
-        upload_to_server(&project_root, &version, &zip_paths, args.upload_prod)?;
-    } else {
-        println!("Skipping upload - VERSION_SERVER_API_KEY not set");
-        println!("Created zip files:");
-        for (platform, path) in &zip_paths {
-            println!("  {}: {}", platform, path.display());
+
+        if args.skip_upload {
+            println!("Skipping upload - --skip-upload flag provided");
+        } else if env::var("VERSION_SERVER_API_KEY").ok().is_some() {
+            println!("Uploading to version server...");
+            upload_to_server(&project_root, &version, &zip_paths, args.upload_prod)?;
+        } else {
+            println!("Skipping upload - VERSION_SERVER_API_KEY not set");
         }
     }
 

@@ -1,14 +1,13 @@
 [package]
 name = "idle-hue"
-version = "0.6.1"
+version = "0.8.0"
 edition = "2024"
 
 [features]
 prod = []
 
 [dependencies]
-# ui = { git = "https://github.com/cyypherus/ui", branch = "mvp" }
-haven = { path = "../../haven" }
+haven = { git = "https://github.com/cyypherus/haven", branch = "main" }
 arboard = "3.4"
 serde = { workspace = true }
 serde_json = { workspace = true }

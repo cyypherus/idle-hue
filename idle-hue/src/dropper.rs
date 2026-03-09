@@ -10,22 +10,22 @@ pub(crate) fn sample_color() -> oneshot::Receiver<Option<[f32; 3]>> {
         use block2::RcBlock;
         use objc2_app_kit::{NSColor, NSColorSampler, NSColorSpace};
 
-        let sampler = unsafe { NSColorSampler::new() };
+        let sampler = NSColorSampler::new();
 
         let handler = RcBlock::new(move |color: *mut NSColor| {
             let result = if color.is_null() {
                 None
             } else {
                 let color = unsafe { &*color };
-                let srgb_space = unsafe { NSColorSpace::sRGBColorSpace() };
-                let srgb_color = unsafe { color.colorUsingColorSpace(&srgb_space) };
-                srgb_color.map(|c| unsafe {
+                let srgb_space = NSColorSpace::sRGBColorSpace();
+                let srgb_color = color.colorUsingColorSpace(&srgb_space);
+                srgb_color.map(|c|
                     [
                         c.redComponent() as f32,
                         c.greenComponent() as f32,
                         c.blueComponent() as f32,
                     ]
-                })
+                )
             };
             if let Some(tx) = tx.lock().unwrap().take() {
                 let _ = tx.send(result);
