@@ -237,7 +237,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "backer"
 version = "0.11.1"
-source = "git+https://github.com/cyypherus/backer?branch=experiment#6affe8bc9709dc400698459bf1ef13ea3f32299e"
+source = "git+https://github.com/cyypherus/backer?branch=main#6b0eec51e422abd35e9aba2e1c0bcc59f92d0882"
 
 [[package]]
 name = "base64"
@@ -1400,13 +1400,15 @@ dependencies = [
 [[package]]
 name = "haven"
 version = "0.1.0"
-source = "git+https://github.com/cyypherus/haven?branch=main#ebbdf6c47fb96b166afc801edd8a4fab48c5b84c"
 dependencies = [
  "backer",
  "bytemuck",
  "clipboard-rs",
  "image",
+ "kurbo",
+ "lilt",
  "parley",
+ "peniko",
  "pollster",
  "tokio",
  "tokio-util",
@@ -1936,6 +1938,15 @@ dependencies = [
  "libc",
  "plain",
  "redox_syscall 0.7.3",
+]
+
+[[package]]
+name = "lilt"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f67562e5eff6b20553fa9be1c503356768420994e28f67e3eafe6f41910e57ad"
+dependencies = [
+ "web-time",
 ]
 
 [[package]]

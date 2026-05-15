@@ -9,10 +9,14 @@ mod dropper;
 use arboard::Clipboard;
 use auto_update::{AutoUpdater, UpdateStatus};
 use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
+use haven::winit::WinitApp;
 use haven::*;
 use std::array::from_fn;
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::Mutex;
+
+type UiCallback = Box<dyn FnOnce(&mut State, &mut PaneState) + Send>;
 
 #[derive(Clone, Debug)]
 struct PaletteState {
@@ -115,6 +119,8 @@ const MOON_ICON: &str = include_str!("assets/moon.svg");
 const DROPPER_ICON: &str = include_str!("assets/dropper.svg");
 
 struct State {
+    tx: Sender<UiCallback>,
+    rx: Receiver<UiCallback>,
     values: [f32; 3],
     sliders: [SliderState; 3],
     format_fields: [TextState; 3],
@@ -254,13 +260,13 @@ impl State {
             .map(|p| p.config_dir().join("state.json"))
     }
 
-    fn save_state(&self, app: &mut AppState) {
+    fn save_state(&self, _app: &mut PaneState) {
         let saved = SavedState {
             values: self.values,
             dark_mode: self.dark_mode,
             palette: self.palette.colors.to_vec(),
         };
-        app.spawn(async move {
+        tokio::spawn(async move {
             if let Some(path) = Self::config_path() {
                 if let Some(parent) = path.parent() {
                     let _ = tokio::fs::create_dir_all(parent).await;
@@ -275,7 +281,10 @@ impl State {
 
 impl Default for State {
     fn default() -> Self {
+        let (tx, rx) = channel();
         let mut s = Self {
+            tx,
+            rx,
             values: [0.7, 0.15, 180.0],
             sliders: Default::default(),
             format_fields: Default::default(),
@@ -295,62 +304,80 @@ impl Default for State {
     }
 }
 
-fn main() {
-    App::builder(
-        State::default(),
-        Window::new("main", view)
-            .title("idle-hue")
-            .inner_size(400, 420),
-    )
-    .on_start(|_state, app| {
-        let load_tx = app.callback(|state: &mut State, saved: SavedState| {
-            state.values = saved.values;
-            state.dark_mode = saved.dark_mode;
-            for (i, color) in saved.palette.into_iter().enumerate() {
-                if i < PALETTE_SIZE {
-                    state.palette.colors[i] = color;
-                }
-            }
-            state.update_ui();
-        });
-        app.spawn(async move {
-            if let Some(path) = State::config_path()
-                && let Ok(content) = tokio::fs::read_to_string(&path).await
-                && let Ok(saved) = serde_json::from_str::<SavedState>(&content)
-            {
-                load_tx.send(saved);
-            }
-        });
-
-        let tx = app.callback(|state: &mut State, status: UpdateStatus| {
-            state.update_status = status;
-        });
-        app.spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60 * 4));
-            loop {
-                interval.tick().await;
-                let updater = AutoUpdater::new();
-                let tx = tx.clone();
-                updater
-                    .check_and_install_updates_with_callback(Some(
-                        move |new_status: UpdateStatus| {
-                            let tx = tx.clone();
-                            async move {
-                                tx.send(new_status);
-                            }
-                        },
-                    ))
-                    .await;
-            }
-        });
-    })
-    .on_exit(|state, app| {
-        state.save_state(app);
-    })
-    .start()
+#[tokio::main]
+async fn main() {
+    WinitApp::new(State::default())
+        .pane(
+            PaneBuilder::new("main", view)
+                .title("idle-hue")
+                .inner_size(400, 420)
+                .on_start(on_start)
+                .on_wake(on_wake)
+                .on_exit(|state, app| {
+                    state.save_state(app);
+                }),
+        )
+        .run()
 }
 
-fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx> {
+fn on_start(state: &mut State, app: &mut PaneState) {
+    let tx = state.tx.clone();
+    let wake = app.waker();
+    tokio::spawn(async move {
+        if let Some(path) = State::config_path()
+            && let Ok(content) = tokio::fs::read_to_string(&path).await
+            && let Ok(saved) = serde_json::from_str::<SavedState>(&content)
+        {
+            tx.send(Box::new(move |state: &mut State, app: &mut PaneState| {
+                state.values = saved.values;
+                state.dark_mode = saved.dark_mode;
+                for (i, color) in saved.palette.into_iter().enumerate() {
+                    if i < PALETTE_SIZE {
+                        state.palette.colors[i] = color;
+                    }
+                }
+                state.update_ui();
+                app.redraw();
+            }))
+            .ok();
+            wake.wake();
+        }
+    });
+
+    let tx = state.tx.clone();
+    let wake = app.waker();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60 * 4));
+        loop {
+            interval.tick().await;
+            let updater = AutoUpdater::new();
+            let tx = tx.clone();
+            let wake = wake.clone();
+            updater
+                .check_and_install_updates_with_callback(Some(move |new_status: UpdateStatus| {
+                    let tx = tx.clone();
+                    let wake = wake.clone();
+                    async move {
+                        tx.send(Box::new(move |state: &mut State, app: &mut PaneState| {
+                            state.update_status = new_status;
+                            app.redraw();
+                        }))
+                        .ok();
+                        wake.wake();
+                    }
+                }))
+                .await;
+        }
+    });
+}
+
+fn on_wake(state: &mut State, app: &mut PaneState) {
+    while let Ok(callback) = state.rx.try_recv() {
+        callback(state, app);
+    }
+}
+
+fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneState> {
     let bg = s.theme(Theme::Gray0);
     let field_bg = s.theme(Theme::Gray30);
     let field_border = s.theme(Theme::Gray50);
@@ -367,23 +394,23 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
     .with_alpha(0.5);
 
     stack(vec![
-        rect(id!()).fill(bg).corner_rounding(0.).build(app.ctx()),
+        rect(id!()).fill(bg).corner_rounding(0.).build(app),
         column(vec![
             column_spaced(
                 10.,
                 vec![
                     row_spaced(10., {
-                        let mut buttons: Vec<Layout<'_, View<State>, AppCtx>> =
+                        let mut buttons: Vec<Layout<'_, View<State>, PaneState>> =
                             vec![space().inert_y()];
                         #[cfg(not(target_os = "windows"))]
                         buttons.push(
                             button(
                                 id!(),
                                 (
-                                    s.dropper_button,
+                                    &s.dropper_button,
                                     Binding::new(
-                                        |s: &State| s.dropper_button,
-                                        |s: &mut State, v| s.dropper_button = v,
+                                        |s: &State| &s.dropper_button,
+                                        |s: &mut State| &mut s.dropper_button,
                                     ),
                                 ),
                             )
@@ -400,22 +427,29 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                     .finish(ctx)
                                     .pad(6.)
                             })
-                            .on_click(|_state, app: &mut AppState| {
-                                let tx = app.callback(|state: &mut State, rgb: [f32; 3]| {
-                                    let srgb =
-                                        AlphaColor::<Srgb>::new([rgb[0], rgb[1], rgb[2], 1.0]);
-                                    let oklch: AlphaColor<Oklch> = srgb.convert();
-                                    let c = oklch.components;
-                                    state.values = [c[0], c[1], c[2]];
-                                    state.update_ui();
-                                });
-                                app.spawn(async move {
+                            .on_click(|state, app| {
+                                let tx = state.tx.clone();
+                                let wake = app.waker();
+                                tokio::spawn(async move {
                                     if let Ok(Some(rgb)) = dropper::sample_color().await {
-                                        tx.send(rgb);
+                                        tx.send(Box::new(
+                                            move |state: &mut State, app: &mut PaneState| {
+                                                let srgb = AlphaColor::<Srgb>::new([
+                                                    rgb[0], rgb[1], rgb[2], 1.0,
+                                                ]);
+                                                let oklch: AlphaColor<Oklch> = srgb.convert();
+                                                let c = oklch.components;
+                                                state.values = [c[0], c[1], c[2]];
+                                                state.update_ui();
+                                                app.redraw();
+                                            },
+                                        ))
+                                        .ok();
+                                        wake.wake();
                                     }
                                 });
                             })
-                            .build(app.ctx())
+                            .build(app)
                             .height(30.)
                             .width(30.),
                         );
@@ -423,10 +457,10 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                             button(
                                 id!(),
                                 (
-                                    s.dark_mode_button,
+                                    &s.dark_mode_button,
                                     Binding::new(
-                                        |s: &State| s.dark_mode_button,
-                                        |s: &mut State, v| s.dark_mode_button = v,
+                                        |s: &State| &s.dark_mode_button,
+                                        |s: &mut State| &mut s.dark_mode_button,
                                     ),
                                 ),
                             )
@@ -446,7 +480,7 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                             .on_click(|state, _| {
                                 state.dark_mode = !state.dark_mode;
                             })
-                            .build(app.ctx())
+                            .build(app)
                             .height(30.)
                             .width(30.),
                         );
@@ -459,7 +493,7 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                 .fill(s.display_color())
                                 .stroke(field_border, Stroke::new(1.))
                                 .corner_rounding(8.)
-                                .build(app.ctx())
+                                .build(app)
                                 .inert_y(),
                             row_spaced(
                                 10.,
@@ -471,13 +505,11 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                                 text_field(
                                                     id!(i as u64),
                                                     (
-                                                        s.format_fields[i].clone(),
+                                                        &s.format_fields[i],
                                                         Binding::new(
-                                                            move |s: &State| {
-                                                                s.format_fields[i].clone()
-                                                            },
-                                                            move |s: &mut State, v| {
-                                                                s.format_fields[i] = v
+                                                            move |s: &State| &s.format_fields[i],
+                                                            move |s: &mut State| {
+                                                                &mut s.format_fields[i]
                                                             },
                                                         ),
                                                     ),
@@ -508,7 +540,7 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                                         .build(ctx)
                                                 })
                                                 .padding(5.)
-                                                .build(app.ctx())
+                                                .build(app)
                                                 .expand_x()
                                                 .height(30.)
                                             })
@@ -528,11 +560,11 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                                 button(
                                                     id!(i as u64),
                                                     (
-                                                        s.copy_buttons[i],
+                                                        &s.copy_buttons[i],
                                                         Binding::new(
-                                                            move |s: &State| s.copy_buttons[i],
-                                                            move |s: &mut State, v| {
-                                                                s.copy_buttons[i] = v
+                                                            move |s: &State| &s.copy_buttons[i],
+                                                            move |s: &mut State| {
+                                                                &mut s.copy_buttons[i]
                                                             },
                                                         ),
                                                     ),
@@ -574,17 +606,17 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                                         c[i] = true;
                                                     }
                                                     let copied_reset = copied_state.clone();
-                                                    let redraw = app.redraw_trigger();
-                                                    app.spawn(async move {
+                                                    let wake = app.waker();
+                                                    tokio::spawn(async move {
                                                         tokio::time::sleep(
                                                             tokio::time::Duration::from_secs(2),
                                                         )
                                                         .await;
                                                         copied_reset.lock().await[i] = false;
-                                                        redraw.trigger().await;
+                                                        wake.wake();
                                                     });
                                                 })
-                                                .build(app.ctx())
+                                                .build(app)
                                                 .width(30.)
                                                 .height(30.)
                                             })
@@ -606,7 +638,7 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
                                                 .font_size(16)
                                                 .font_weight(FontWeight::BOLD)
                                                 .fill(label_color)
-                                                .build(app.ctx()),
+                                                .build(app),
                                         ])
                                         .height(30.)
                                     })
@@ -642,7 +674,7 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
             rect(id!())
                 .fill(field_border)
                 .corner_rounding(0.)
-                .build(app.ctx())
+                .build(app)
                 .height(1.),
             row(vec![update_button(s, label_color, app), space().inert_y()])
                 .pad_x(20.)
@@ -654,8 +686,8 @@ fn view<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx>
 fn update_button<'a>(
     s: &'a State,
     label_color: Color,
-    app: &mut AppState,
-) -> Layout<'a, View<State>, AppCtx> {
+    app: &mut PaneState,
+) -> Layout<'a, View<State>, PaneState> {
     let status = &s.update_status;
     let btn = s.update_button;
     let label_text = match status {
@@ -683,24 +715,32 @@ fn update_button<'a>(
         })
         .on_click(move |state, app| {
             if matches!(state.update_status, UpdateStatus::Updated { .. }) {
-                app.spawn(async move {
+                tokio::spawn(async move {
                     if let Err(e) = AutoUpdater::restart_application().await {
                         log::error!("Failed to restart: {e}");
                     }
                 });
             } else if !matches!(state.update_status, UpdateStatus::Checking) {
                 state.update_status = UpdateStatus::Checking;
-                let tx = app.callback(|state: &mut State, status: UpdateStatus| {
-                    state.update_status = status;
-                });
-                app.spawn(async move {
+                app.redraw();
+                let tx = state.tx.clone();
+                let wake = app.waker();
+                tokio::spawn(async move {
                     let updater = AutoUpdater::new();
                     updater
                         .check_and_install_updates_with_callback(Some(
                             move |new_status: UpdateStatus| {
                                 let tx = tx.clone();
+                                let wake = wake.clone();
                                 async move {
-                                    tx.send(new_status);
+                                    tx.send(Box::new(
+                                        move |state: &mut State, app: &mut PaneState| {
+                                            state.update_status = new_status;
+                                            app.redraw();
+                                        },
+                                    ))
+                                    .ok();
+                                    wake.wake();
                                 }
                             },
                         ))
@@ -708,18 +748,18 @@ fn update_button<'a>(
                 });
             }
         })
-        .build(app.ctx())
+        .build(app)
         .height(25.)
 }
 
 fn channel_slider<'a>(
     key: u64,
     i: usize,
-    binding: ([SliderState; 3], Binding<State, [SliderState; 3]>),
+    binding: (&[SliderState; 3], Binding<State, [SliderState; 3]>),
     values: [f32; 3],
     knob_color: Color,
-    app: &mut AppState,
-) -> Layout<'a, View<State>, AppCtx> {
+    app: &mut PaneState,
+) -> Layout<'a, View<State>, PaneState> {
     let ch = &CHANNELS[i];
     let stops: Vec<Color> = (0..=16)
         .map(|step| {
@@ -734,10 +774,10 @@ fn channel_slider<'a>(
     slider(
         id!(key),
         (
-            binding.0[i],
+            &binding.0[i],
             Binding::new(
-                move |s: &State| s.sliders[i],
-                move |s: &mut State, v| s.sliders[i] = v,
+                move |s: &State| &s.sliders[i],
+                move |s: &mut State| &mut s.sliders[i],
             ),
         ),
     )
@@ -781,7 +821,7 @@ fn channel_slider<'a>(
         state.values[i] = val;
         state.update_ui();
     })
-    .build(app.ctx())
+    .build(app)
     .height(26.)
     .pad_y(2.)
 }
@@ -790,7 +830,7 @@ fn palette_color(values: [f32; 3]) -> Color {
     AlphaColor::<Oklch>::new([values[0], values[1], values[2], 1.0]).convert::<Srgb>()
 }
 
-fn palette_grid<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>, AppCtx> {
+fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneState> {
     let rows = (0..PALETTE_HEIGHT)
         .map(|row| {
             let cols = (0..PALETTE_WIDTH)
@@ -821,7 +861,7 @@ fn palette_grid<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>,
                                     TRANSPARENT
                                 },
                             )
-                            .finish(app.ctx())
+                            .finish(app)
                             .height(15.)
                             .width(15.),
                     ])
@@ -843,7 +883,7 @@ fn palette_grid<'a>(s: &'a State, app: &mut AppState) -> Layout<'a, View<State>,
                     state.palette.drag_target = None;
                 }
             })
-            .finish(app.ctx())
+            .finish(app)
             .inert(),
         column_spaced(5., rows),
     ])
@@ -856,8 +896,8 @@ fn palette_swatch<'a>(
     is_drag_target: bool,
     drag_target: Option<usize>,
     s: &'a State,
-    app: &mut AppState,
-) -> Layout<'a, View<State>, AppCtx> {
+    app: &mut PaneState,
+) -> Layout<'a, View<State>, PaneState> {
     stack(vec![
         rect(id!(index as u64))
             .fill(swatch_color.unwrap_or(s.theme(Theme::Gray30)))
@@ -876,7 +916,7 @@ fn palette_swatch<'a>(
                 }),
             )
             .corner_rounding(6.)
-            .build(app.ctx()),
+            .build(app),
         stack(vec![
             rect(id!(index as u64))
                 .corner_rounding(4.)
@@ -885,7 +925,7 @@ fn palette_swatch<'a>(
                 } else {
                     TRANSPARENT
                 })
-                .build(app.ctx())
+                .build(app)
                 .inert(),
             svg(id!(index as u64), X_ICON)
                 .fill(if drag_target.is_none() && is_dragging {
@@ -893,7 +933,7 @@ fn palette_swatch<'a>(
                 } else {
                     TRANSPARENT
                 })
-                .finish(app.ctx()),
+                .finish(app),
         ])
         .height(15.)
         .width(15.)
@@ -913,7 +953,7 @@ fn palette_swatch<'a>(
     )
 }
 
-fn palette_sensor(index: usize, app: &mut AppState) -> Layout<'static, View<State>, AppCtx> {
+fn palette_sensor(index: usize, app: &mut PaneState) -> Layout<'static, View<State>, PaneState> {
     rect(id!(index as u64))
         .fill(Color::TRANSPARENT)
         .view()
@@ -967,5 +1007,5 @@ fn palette_sensor(index: usize, app: &mut AppState) -> Layout<'static, View<Stat
                 }
             }
         })
-        .finish(app.ctx())
+        .finish(app)
 }

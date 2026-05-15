@@ -7,11 +7,11 @@ edition = "2024"
 prod = []
 
 [dependencies]
-haven = { git = "https://github.com/cyypherus/haven", branch = "main" }
+haven = { path = "../../proj" }
 arboard = "3.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["fs", "process", "io-util", "time"] }
+tokio = { workspace = true, features = ["fs", "process", "io-util", "time", "rt-multi-thread"] }
 version-api-client = { path = "../version-api-client" }
 version-api-models = { path = "../version-api-models" }
 tempfile = "3.8"
