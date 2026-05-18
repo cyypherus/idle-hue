@@ -27,6 +27,12 @@ struct PaletteState {
     drag_offset: Point,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct TextPopover {
+    field: usize,
+    position: Point,
+}
+
 impl Default for PaletteState {
     fn default() -> Self {
         Self {
@@ -126,6 +132,10 @@ struct State {
     format_fields: [TextState; 3],
     editing_format: Option<usize>,
     copy_buttons: [ButtonState; 3],
+    text_popover: Option<TextPopover>,
+    text_popover_cut_button: ButtonState,
+    text_popover_copy_button: ButtonState,
+    text_popover_paste_button: ButtonState,
     dark_mode: bool,
     dark_mode_button: ButtonState,
     #[cfg(not(target_os = "windows"))]
@@ -290,6 +300,10 @@ impl Default for State {
             format_fields: Default::default(),
             editing_format: None,
             copy_buttons: Default::default(),
+            text_popover: None,
+            text_popover_cut_button: Default::default(),
+            text_popover_copy_button: Default::default(),
+            text_popover_paste_button: Default::default(),
             dark_mode: true,
             dark_mode_button: Default::default(),
             #[cfg(not(target_os = "windows"))]
@@ -502,45 +516,85 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                         10.,
                                         (0..3)
                                             .map(|i| {
-                                                text_field(
-                                                    id!(i as u64),
-                                                    (
-                                                        &s.format_fields[i],
-                                                        Binding::new(
-                                                            move |s: &State| &s.format_fields[i],
-                                                            move |s: &mut State| {
-                                                                &mut s.format_fields[i]
-                                                            },
+                                                let field_id = id!(i as u64);
+                                                stack(vec![
+                                                    text_field(
+                                                        field_id,
+                                                        (
+                                                            &s.format_fields[i],
+                                                            Binding::new(
+                                                                move |s: &State| {
+                                                                    &s.format_fields[i]
+                                                                },
+                                                                move |s: &mut State| {
+                                                                    &mut s.format_fields[i]
+                                                                },
+                                                            ),
                                                         ),
-                                                    ),
-                                                )
-                                                .font_size(16)
-                                                .text_fill(label_color)
-                                                .cursor_fill(label_color)
-                                                .highlight_fill(highlight_color)
-                                                .enter_end_editing()
-                                                .esc_end_editing()
-                                                .on_edit(move |state, _, edit| match edit {
-                                                    EditInteraction::Update(text) => {
-                                                        state.editing_format = Some(i);
-                                                        if state.parse_format(&text) {
+                                                    )
+                                                    .font_size(16)
+                                                    .text_fill(label_color)
+                                                    .cursor_fill(label_color)
+                                                    .highlight_fill(highlight_color)
+                                                    .enter_end_editing()
+                                                    .esc_end_editing()
+                                                    .on_edit(move |state, _, edit| match edit {
+                                                        EditInteraction::Start => {
+                                                            state.editing_format = Some(i);
+                                                        }
+                                                        EditInteraction::Update(text) => {
+                                                            state.editing_format = Some(i);
+                                                            if state.parse_format(&text) {
+                                                                state.update_ui();
+                                                            }
+                                                        }
+                                                        EditInteraction::End => {
+                                                            state.editing_format = None;
                                                             state.update_ui();
                                                         }
-                                                    }
-                                                    EditInteraction::End => {
-                                                        state.editing_format = None;
-                                                        state.update_ui();
-                                                    }
-                                                })
-                                                .background(move |_, _, ctx| {
-                                                    rect(id!(i as u64))
-                                                        .fill(s.theme(Theme::Gray30))
-                                                        .stroke(s.display_color(), Stroke::new(1.))
-                                                        .corner_rounding(6.)
-                                                        .build(ctx)
-                                                })
-                                                .padding(5.)
-                                                .build(app)
+                                                    })
+                                                    .background(move |_, _, ctx| {
+                                                        rect(id!(i as u64))
+                                                            .fill(s.theme(Theme::Gray30))
+                                                            .stroke(
+                                                                s.display_color(),
+                                                                Stroke::new(1.),
+                                                            )
+                                                            .corner_rounding(6.)
+                                                            .build(ctx)
+                                                    })
+                                                    .padding(5.)
+                                                    .build(app)
+                                                    .expand_x()
+                                                    .height(30.),
+                                                    rect(id!(100 + i as u64))
+                                                        .fill(Color::TRANSPARENT)
+                                                        .view()
+                                                        .on_click(
+                                                            MouseButton::Right,
+                                                            move |state: &mut State, _app, event| {
+                                                                if matches!(
+                                                                    event.state,
+                                                                    ClickPhase::Completed
+                                                                )
+                                                                {
+                                                                    state.editing_format = Some(i);
+                                                                    state.format_fields[i]
+                                                                        .begin_editing(_app);
+                                                                    state.text_popover =
+                                                                        Some(TextPopover {
+                                                                            field: i,
+                                                                            position: event
+                                                                                .location
+                                                                                .global(),
+                                                                        });
+                                                                }
+                                                            },
+                                                        )
+                                                        .build(app)
+                                                        .expand_x()
+                                                        .height(30.),
+                                                ])
                                                 .expand_x()
                                                 .height(30.)
                                             })
@@ -680,7 +734,178 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                 .pad_x(20.)
                 .pad_y(6.),
         ]),
+        text_popover_layer(s, field_bg, field_border, label_color, app),
     ])
+}
+
+fn text_popover_layer<'a>(
+    s: &'a State,
+    field_bg: Color,
+    field_border: Color,
+    label_color: Color,
+    app: &mut PaneState,
+) -> Layout<'a, View<State>, PaneState> {
+    let Some(popover) = s.text_popover else {
+        return empty();
+    };
+    let field = popover.field;
+    let x = popover.position.x as f32;
+    let y = popover.position.y as f32;
+
+    let cut_button = context_menu_button(
+        context_menu_action_id(field, 0),
+        "Cut",
+        "X",
+        binding!(s, State, text_popover_cut_button),
+        field_bg,
+        label_color,
+        app,
+        move |state, app| {
+            if state.format_fields[field].cut_text(app).is_some() {
+                state.editing_format = Some(field);
+                let text = state.format_fields[field].text.clone();
+                if state.parse_format(&text) {
+                    state.update_ui();
+                }
+            }
+        },
+    );
+
+    let copy_button = context_menu_button(
+        context_menu_action_id(field, 1),
+        "Copy",
+        "C",
+        binding!(s, State, text_popover_copy_button),
+        field_bg,
+        label_color,
+        app,
+        move |state, _app| {
+            let _ = state.format_fields[field].copy_text();
+        },
+    );
+
+    let paste_button = context_menu_button(
+        context_menu_action_id(field, 2),
+        "Paste",
+        "V",
+        binding!(s, State, text_popover_paste_button),
+        field_bg,
+        label_color,
+        app,
+        move |state, app| {
+            state.format_fields[field].paste_text(app);
+            state.editing_format = Some(field);
+            let text = state.format_fields[field].text.clone();
+            if state.parse_format(&text) {
+                state.update_ui();
+            }
+        },
+    );
+
+    stack(vec![
+        stack(vec![
+            shadow(id!()).build(app).offset(0., 5.),
+            rect(id!())
+                .fill(field_bg)
+                .stroke(field_border, Stroke::new(1.))
+                .corner_rounding(6.)
+                .view()
+                .on_click(MouseButton::Left, |state: &mut State, _app, event| {
+                    if matches!(event.state, ClickPhase::Completed) {
+                        state.text_popover = None;
+                    }
+                })
+                .on_click_outside(MouseButton::Left, |state: &mut State, _app, event| {
+                    if matches!(event.state, ClickPhase::Completed) {
+                        state.text_popover = None;
+                    }
+                })
+                .build(app),
+            column_spaced(2., vec![cut_button, copy_button, paste_button]).pad(3.),
+        ])
+        .align(Align::TopLeading),
+    ])
+    .width(1.)
+    .height(1.)
+    .offset(x, y)
+    .align(Align::TopLeading)
+    .layer(10)
+}
+
+fn context_menu_action_id(field: usize, action: u64) -> u64 {
+    ((field as u64) << 8) | action
+}
+
+fn context_menu_button<'a>(
+    action_id: u64,
+    label: &'static str,
+    shortcut_key: &'static str,
+    state: (&'a ButtonState, Binding<State, ButtonState>),
+    field_bg: Color,
+    label_color: Color,
+    app: &mut PaneState,
+    on_click: impl Fn(&mut State, &mut PaneState) + 'static,
+) -> Layout<'a, View<State>, PaneState> {
+    button(id!(action_id, 0_u64), state)
+        .surface(move |btn, ctx| {
+            rect(id!(action_id, 1_u64))
+                .fill(btn_surface_color(btn, field_bg))
+                .corner_rounding(5.)
+                .build(ctx)
+        })
+        .label(move |btn, ctx| {
+            row(vec![
+                text(id!(action_id, 2_u64), label)
+                    .font_size(13)
+                    .fill(btn_label_color(btn, label_color))
+                    .build(ctx),
+                space().inert_y(),
+                shortcut_view(
+                    action_id,
+                    shortcut_key,
+                    btn_label_color(btn, label_color),
+                    ctx,
+                ),
+            ])
+            .pad_x(8.)
+        })
+        .on_click(move |state, app| {
+            on_click(state, app);
+            state.text_popover = None;
+        })
+        .build(app)
+        .width(90.)
+        .height(28.)
+}
+
+fn shortcut_view<'a>(
+    action_id: u64,
+    key: &'static str,
+    color: Color,
+    app: &mut PaneState,
+) -> Layout<'a, View<State>, PaneState> {
+    let color = color.with_alpha(0.7);
+    if cfg!(target_os = "macos") {
+        row_spaced(
+            3.,
+            vec![
+                text(id!(action_id, 3_u64), "⌘")
+                    .font_family("Apple Symbols")
+                    .font_size(12)
+                    .fill(color)
+                    .build(app),
+                text(id!(action_id, 4_u64), key)
+                    .font_size(12)
+                    .fill(color)
+                    .build(app),
+            ],
+        )
+    } else {
+        text(id!(action_id, 5_u64), format!("Ctrl {key}"))
+            .font_size(12)
+            .fill(color)
+            .build(app)
+    }
 }
 
 fn update_button<'a>(
@@ -883,7 +1108,7 @@ fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>
                     state.palette.drag_target = None;
                 }
             })
-            .finish(app)
+            .build(app)
             .inert(),
         column_spaced(5., rows),
     ])
@@ -963,34 +1188,32 @@ fn palette_sensor(index: usize, app: &mut PaneState) -> Layout<'static, View<Sta
                 state.palette.drag_target = Some(index);
             }
         })
-        .on_click(
-            move |state: &mut State, app, click_state, _click_location| {
-                if matches!(click_state, ClickState::Completed) {
-                    if let Some(palette_values) = state.palette.colors[index] {
-                        state.values = palette_values;
-                        state.update_ui();
-                    } else {
-                        state.palette.colors[index] = Some(state.values);
-                    }
-                    state.save_state(app);
+        .on_click(MouseButton::Left, move |state: &mut State, app, event| {
+            if matches!(event.state, ClickPhase::Completed) {
+                if let Some(palette_values) = state.palette.colors[index] {
+                    state.values = palette_values;
+                    state.update_ui();
+                } else {
+                    state.palette.colors[index] = Some(state.values);
                 }
-            },
-        )
+                state.save_state(app);
+            }
+        })
         .on_drag(move |state: &mut State, app, drag| match drag {
-            DragState::Began { .. } => {
+            DragPhase::Began { .. } => {
                 if state.palette.colors[index].is_some() {
                     state.palette.dragging = Some(index);
                     state.palette.drag_offset = Point::ZERO;
                     state.palette.drag_target = Some(index);
                 }
             }
-            DragState::Updated { start, current, .. } => {
+            DragPhase::Updated { start, current, .. } => {
                 if state.palette.dragging == Some(index) {
                     state.palette.drag_offset =
                         Point::new(current.x - start.x, current.y - start.y);
                 }
             }
-            DragState::Completed { .. } => {
+            DragPhase::Completed { .. } => {
                 if let Some(dragging_index) = state.palette.dragging {
                     if let Some(target_index) = state.palette.drag_target {
                         let dragging_color = state.palette.colors[dragging_index];
@@ -1007,5 +1230,5 @@ fn palette_sensor(index: usize, app: &mut PaneState) -> Layout<'static, View<Sta
                 }
             }
         })
-        .finish(app)
+        .build(app)
 }
