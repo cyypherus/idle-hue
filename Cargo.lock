@@ -1686,6 +1686,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "haven",
+ "image",
  "log",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -1698,6 +1699,8 @@ dependencies = [
  "tokio",
  "version-api-client",
  "version-api-models",
+ "windows-sys 0.61.2",
+ "winit",
  "zip",
 ]
 

@@ -6,6 +6,9 @@ mod auto_update;
 #[cfg(not(target_os = "windows"))]
 mod dropper;
 
+#[cfg(target_os = "windows")]
+use ::winit::platform::windows::IconExtWindows;
+use ::winit::window::Icon;
 use arboard::Clipboard;
 use auto_update::{AutoUpdater, UpdateStatus};
 use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
@@ -23,14 +26,25 @@ struct PaletteState {
     colors: [Option<[f32; 3]>; PALETTE_SIZE],
     hover: [bool; PALETTE_SIZE],
     dragging: Option<usize>,
-    drag_target: Option<usize>,
+    drag_target: PaletteDragTarget,
     drag_offset: Point,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PaletteDragTarget {
+    #[default]
+    None,
+    Swatch(usize),
+    Delete,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct TextPopover {
     field: usize,
     position: Point,
+    cut_button: ButtonState,
+    copy_button: ButtonState,
+    paste_button: ButtonState,
 }
 
 impl Default for PaletteState {
@@ -39,7 +53,7 @@ impl Default for PaletteState {
             colors: from_fn(|_| None),
             hover: [false; PALETTE_SIZE],
             dragging: None,
-            drag_target: None,
+            drag_target: PaletteDragTarget::None,
             drag_offset: Point::ZERO,
         }
     }
@@ -101,6 +115,13 @@ const X_ICON: &str = include_str!("assets/x.svg");
 const PALETTE_WIDTH: usize = 14;
 const PALETTE_HEIGHT: usize = 3;
 const PALETTE_SIZE: usize = PALETTE_WIDTH * PALETTE_HEIGHT;
+const PALETTE_SWATCH_SIZE: f32 = 20.0;
+const PALETTE_SWATCH_GAP: f32 = 5.0;
+
+#[cfg(test)]
+const TEST_FORMAT_OVERLAY_IDS: [u64; 3] = [30_003, 30_004, 30_005];
+#[cfg(test)]
+const TEST_CHANNEL_SLIDER_IDS: [u64; 3] = [30_006, 30_007, 30_008];
 
 fn btn_surface_color(btn: ButtonState, base: Color) -> Color {
     match (btn.depressed, btn.hovered) {
@@ -130,12 +151,8 @@ struct State {
     values: [f32; 3],
     sliders: [SliderState; 3],
     format_fields: [TextState; 3],
-    editing_format: Option<usize>,
     copy_buttons: [ButtonState; 3],
     text_popover: Option<TextPopover>,
-    text_popover_cut_button: ButtonState,
-    text_popover_copy_button: ButtonState,
-    text_popover_paste_button: ButtonState,
     dark_mode: bool,
     dark_mode_button: ButtonState,
     #[cfg(not(target_os = "windows"))]
@@ -223,7 +240,7 @@ impl State {
     fn update_format_fields(&mut self) {
         let fmts = self.formats();
         for (i, fmt) in fmts.iter().enumerate() {
-            if self.editing_format == Some(i) {
+            if self.format_fields[i].editing {
                 continue;
             }
             let val = if i == 0 {
@@ -235,7 +252,21 @@ impl State {
         }
     }
 
-    fn parse_format(&mut self, text: &str) -> bool {
+    fn end_format_editing(&mut self, app: &mut PaneState) {
+        for field in &mut self.format_fields {
+            if field.editing {
+                field.end_editing(app);
+            }
+        }
+    }
+
+    fn set_values(&mut self, values: [f32; 3], app: &mut PaneState) {
+        self.values = values;
+        self.end_format_editing(app);
+        self.update_ui();
+    }
+
+    fn parse_format(&mut self, text: &str, app: &mut PaneState) -> bool {
         let input = text.trim();
         let parsed = parse_color(input)
             .ok()
@@ -251,7 +282,7 @@ impl State {
             }
         };
         let c = oklch.components;
-        self.values = [c[0], c[1], c[2]];
+        self.set_values([c[0], c[1], c[2]], app);
         true
     }
 
@@ -298,12 +329,8 @@ impl Default for State {
             values: [0.7, 0.15, 180.0],
             sliders: Default::default(),
             format_fields: Default::default(),
-            editing_format: None,
             copy_buttons: Default::default(),
             text_popover: None,
-            text_popover_cut_button: Default::default(),
-            text_popover_copy_button: Default::default(),
-            text_popover_paste_button: Default::default(),
             dark_mode: true,
             dark_mode_button: Default::default(),
             #[cfg(not(target_os = "windows"))]
@@ -320,7 +347,11 @@ impl Default for State {
 
 #[tokio::main]
 async fn main() {
+    #[cfg(target_os = "windows")]
+    set_app_user_model_id();
+
     WinitApp::new(State::default())
+        .window_icon(app_icon())
         .pane(
             PaneBuilder::new("main", view)
                 .title("idle-hue")
@@ -334,6 +365,38 @@ async fn main() {
         .run()
 }
 
+#[cfg(target_os = "windows")]
+fn set_app_user_model_id() {
+    let id: Vec<u16> = "cyy.apps.idle-hue"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let result = unsafe {
+        windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr())
+    };
+    if result < 0 {
+        log::error!("Failed to set Windows AppUserModelID: 0x{result:08x}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn app_icon() -> Icon {
+    Icon::from_resource(1, None).unwrap_or_else(|_| png_app_icon())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn app_icon() -> Icon {
+    png_app_icon()
+}
+
+fn png_app_icon() -> Icon {
+    let image = image::load_from_memory(include_bytes!("assets/icon32.png"))
+        .expect("icon32.png should be a valid PNG")
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    Icon::from_rgba(image.into_raw(), width, height).expect("icon32.png should be a valid icon")
+}
+
 fn on_start(state: &mut State, app: &mut PaneState) {
     let tx = state.tx.clone();
     let wake = app.waker();
@@ -343,14 +406,13 @@ fn on_start(state: &mut State, app: &mut PaneState) {
             && let Ok(saved) = serde_json::from_str::<SavedState>(&content)
         {
             tx.send(Box::new(move |state: &mut State, app: &mut PaneState| {
-                state.values = saved.values;
+                state.set_values(saved.values, app);
                 state.dark_mode = saved.dark_mode;
                 for (i, color) in saved.palette.into_iter().enumerate() {
                     if i < PALETTE_SIZE {
                         state.palette.colors[i] = color;
                     }
                 }
-                state.update_ui();
                 app.redraw();
             }))
             .ok();
@@ -453,8 +515,7 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                                 ]);
                                                 let oklch: AlphaColor<Oklch> = srgb.convert();
                                                 let c = oklch.components;
-                                                state.values = [c[0], c[1], c[2]];
-                                                state.update_ui();
+                                                state.set_values([c[0], c[1], c[2]], app);
                                                 app.redraw();
                                             },
                                         ))
@@ -508,7 +569,8 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                 .stroke(field_border, Stroke::new(1.))
                                 .corner_rounding(8.)
                                 .build(app)
-                                .inert_y(),
+                                .inert_y()
+                                .aspect_width(1.),
                             row_spaced(
                                 10.,
                                 vec![
@@ -517,6 +579,10 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                         (0..3)
                                             .map(|i| {
                                                 let field_id = id!(i as u64);
+                                                #[cfg(test)]
+                                                let overlay_id = TEST_FORMAT_OVERLAY_IDS[i];
+                                                #[cfg(not(test))]
+                                                let overlay_id = id!(100 + i as u64);
                                                 stack(vec![
                                                     text_field(
                                                         field_id,
@@ -538,18 +604,12 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                                     .highlight_fill(highlight_color)
                                                     .enter_end_editing()
                                                     .esc_end_editing()
-                                                    .on_edit(move |state, _, edit| match edit {
-                                                        EditInteraction::Start => {
-                                                            state.editing_format = Some(i);
-                                                        }
+                                                    .on_edit(move |state, app, edit| match edit {
+                                                        EditInteraction::Start => {}
                                                         EditInteraction::Update(text) => {
-                                                            state.editing_format = Some(i);
-                                                            if state.parse_format(&text) {
-                                                                state.update_ui();
-                                                            }
+                                                            state.parse_format(&text, app);
                                                         }
                                                         EditInteraction::End => {
-                                                            state.editing_format = None;
                                                             state.update_ui();
                                                         }
                                                     })
@@ -567,29 +627,41 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                                     .build(app)
                                                     .expand_x()
                                                     .height(30.),
-                                                    rect(id!(100 + i as u64))
+                                                    rect(overlay_id)
                                                         .fill(Color::TRANSPARENT)
                                                         .view()
-                                                        .on_click(
-                                                            MouseButton::Right,
-                                                            move |state: &mut State, _app, event| {
-                                                                if matches!(
-                                                                    event.state,
-                                                                    ClickPhase::Completed
-                                                                )
-                                                                {
-                                                                    state.editing_format = Some(i);
-                                                                    state.format_fields[i]
-                                                                        .begin_editing(_app);
-                                                                    state.text_popover =
-                                                                        Some(TextPopover {
-                                                                            field: i,
-                                                                            position: event
-                                                                                .location
-                                                                                .global(),
-                                                                        });
-                                                                }
-                                                            },
+                                                        .gesture(
+                                                            gesture::click(id!(i as u64))
+                                                                .button(MouseButton::Right)
+                                                                .run(move |state: &mut State, app, event| match event.state {
+                                                                    ClickPhase::Started => {
+                                                                        if !state.format_fields[i]
+                                                                            .editing
+                                                                        {
+                                                                            state.format_fields[i]
+                                                                                .begin_editing_with(
+                                                                                    app,
+                                                                                    InitialSelection::All,
+                                                                                );
+                                                                        }
+                                                                    }
+                                                                    ClickPhase::Completed => {
+                                                                        state.text_popover =
+                                                                            Some(TextPopover {
+                                                                                field: i,
+                                                                                position: event
+                                                                                    .location
+                                                                                    .global(),
+                                                                                cut_button:
+                                                                                    ButtonState::default(),
+                                                                                copy_button:
+                                                                                    ButtonState::default(),
+                                                                                paste_button:
+                                                                                    ButtonState::default(),
+                                                                            });
+                                                                    }
+                                                                    ClickPhase::Cancelled => {}
+                                                                }),
                                                         )
                                                         .build(app)
                                                         .expand_x()
@@ -745,7 +817,7 @@ fn text_popover_layer<'a>(
     label_color: Color,
     app: &mut PaneState,
 ) -> Layout<'a, View<State>, PaneState> {
-    let Some(popover) = s.text_popover else {
+    let Some(popover) = s.text_popover.as_ref() else {
         return empty();
     };
     let field = popover.field;
@@ -756,17 +828,20 @@ fn text_popover_layer<'a>(
         context_menu_action_id(field, 0),
         "Cut",
         "X",
-        binding!(s, State, text_popover_cut_button),
+        (
+            &popover.cut_button,
+            Binding::new(
+                |s: &State| &s.text_popover.as_ref().unwrap().cut_button,
+                |s: &mut State| &mut s.text_popover.as_mut().unwrap().cut_button,
+            ),
+        ),
         field_bg,
         label_color,
         app,
         move |state, app| {
             if state.format_fields[field].cut_text(app).is_some() {
-                state.editing_format = Some(field);
                 let text = state.format_fields[field].text.clone();
-                if state.parse_format(&text) {
-                    state.update_ui();
-                }
+                state.parse_format(&text, app);
             }
         },
     );
@@ -775,7 +850,13 @@ fn text_popover_layer<'a>(
         context_menu_action_id(field, 1),
         "Copy",
         "C",
-        binding!(s, State, text_popover_copy_button),
+        (
+            &popover.copy_button,
+            Binding::new(
+                |s: &State| &s.text_popover.as_ref().unwrap().copy_button,
+                |s: &mut State| &mut s.text_popover.as_mut().unwrap().copy_button,
+            ),
+        ),
         field_bg,
         label_color,
         app,
@@ -788,19 +869,49 @@ fn text_popover_layer<'a>(
         context_menu_action_id(field, 2),
         "Paste",
         "V",
-        binding!(s, State, text_popover_paste_button),
+        (
+            &popover.paste_button,
+            Binding::new(
+                |s: &State| &s.text_popover.as_ref().unwrap().paste_button,
+                |s: &mut State| &mut s.text_popover.as_mut().unwrap().paste_button,
+            ),
+        ),
         field_bg,
         label_color,
         app,
         move |state, app| {
             state.format_fields[field].paste_text(app);
-            state.editing_format = Some(field);
             let text = state.format_fields[field].text.clone();
-            if state.parse_format(&text) {
-                state.update_ui();
-            }
+            state.parse_format(&text, app);
         },
     );
+
+    let close_inside = gesture::click(id!())
+        .button(MouseButton::Left)
+        .observe()
+        .run(|state: &mut State, _app, event| {
+            if matches!(event.state, ClickPhase::Completed) {
+                state.text_popover = None;
+            }
+        });
+    let close_outside = gesture::click(id!())
+        .anywhere()
+        .button(MouseButton::Left)
+        .observe()
+        .run(|state: &mut State, _app, event| {
+            if matches!(event.state, ClickPhase::Completed) {
+                state.text_popover = None;
+            }
+        });
+    let close_drag_outside = gesture::drag(id!())
+        .anywhere()
+        .button(MouseButton::Left)
+        .observe()
+        .run(|state: &mut State, _app, event| {
+            if matches!(event, DragPhase::Completed { .. }) {
+                state.text_popover = None;
+            }
+        });
 
     stack(vec![
         stack(vec![
@@ -810,16 +921,9 @@ fn text_popover_layer<'a>(
                 .stroke(field_border, Stroke::new(1.))
                 .corner_rounding(6.)
                 .view()
-                .on_click(MouseButton::Left, |state: &mut State, _app, event| {
-                    if matches!(event.state, ClickPhase::Completed) {
-                        state.text_popover = None;
-                    }
-                })
-                .on_click_outside(MouseButton::Left, |state: &mut State, _app, event| {
-                    if matches!(event.state, ClickPhase::Completed) {
-                        state.text_popover = None;
-                    }
-                })
+                .gesture(close_inside)
+                .occlude(&close_outside)
+                .occlude(&close_drag_outside)
                 .build(app),
             column_spaced(2., vec![cut_button, copy_button, paste_button]).pad(3.),
         ])
@@ -986,6 +1090,10 @@ fn channel_slider<'a>(
     app: &mut PaneState,
 ) -> Layout<'a, View<State>, PaneState> {
     let ch = &CHANNELS[i];
+    #[cfg(test)]
+    let slider_id = TEST_CHANNEL_SLIDER_IDS[i];
+    #[cfg(not(test))]
+    let slider_id = id!(key);
     let stops: Vec<Color> = (0..=16)
         .map(|step| {
             let t = step as f32 / 16.0;
@@ -997,7 +1105,7 @@ fn channel_slider<'a>(
         })
         .collect();
     slider(
-        id!(key),
+        slider_id,
         (
             &binding.0[i],
             Binding::new(
@@ -1042,9 +1150,10 @@ fn channel_slider<'a>(
             ))
             .finish(ctx)
     })
-    .on_change(move |state, _, val| {
-        state.values[i] = val;
-        state.update_ui();
+    .on_change(move |state, app, val| {
+        let mut values = state.values;
+        values[i] = val;
+        state.set_values(values, app);
     })
     .build(app)
     .height(26.)
@@ -1064,7 +1173,10 @@ fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>
                     let swatch_color = s.palette.colors[index].map(palette_color);
                     let is_dragging_this = s.palette.dragging == Some(index);
                     let is_dragging = s.palette.dragging.is_some();
-                    let is_drag_target = s.palette.drag_target == Some(index) && is_dragging;
+                    let is_drag_target = matches!(
+                        s.palette.drag_target,
+                        PaletteDragTarget::Swatch(target) if target == index
+                    ) && is_dragging;
 
                     stack(vec![
                         palette_swatch(
@@ -1072,7 +1184,7 @@ fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>
                             swatch_color,
                             is_dragging_this,
                             is_drag_target,
-                            s.palette.drag_target,
+                            s.palette.drag_target == PaletteDragTarget::Delete,
                             s,
                             app,
                         ),
@@ -1090,12 +1202,12 @@ fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>
                             .height(15.)
                             .width(15.),
                     ])
-                    .height(20.)
-                    .width(20.)
+                    .height(PALETTE_SWATCH_SIZE)
+                    .width(PALETTE_SWATCH_SIZE)
                 })
                 .collect::<Vec<_>>();
 
-            row_spaced(5., cols)
+            row_spaced(PALETTE_SWATCH_GAP, cols)
         })
         .collect::<Vec<_>>();
 
@@ -1103,14 +1215,20 @@ fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>
         rect(id!())
             .fill(Color::TRANSPARENT)
             .view()
-            .on_hover(move |state: &mut State, _app, hovered| {
-                if state.palette.dragging.is_some() && !hovered {
-                    state.palette.drag_target = None;
-                }
-            })
+            .gesture(gesture::hover(id!()).observe().run(
+                move |state: &mut State, _app, hovered| {
+                    if state.palette.dragging.is_some() {
+                        state.palette.drag_target = if hovered {
+                            PaletteDragTarget::None
+                        } else {
+                            PaletteDragTarget::Delete
+                        };
+                    }
+                },
+            ))
             .build(app)
             .inert(),
-        column_spaced(5., rows),
+        column_spaced(PALETTE_SWATCH_GAP, rows),
     ])
 }
 
@@ -1119,7 +1237,7 @@ fn palette_swatch<'a>(
     swatch_color: Option<Color>,
     is_dragging: bool,
     is_drag_target: bool,
-    drag_target: Option<usize>,
+    is_delete_target: bool,
     s: &'a State,
     app: &mut PaneState,
 ) -> Layout<'a, View<State>, PaneState> {
@@ -1145,7 +1263,7 @@ fn palette_swatch<'a>(
         stack(vec![
             rect(id!(index as u64))
                 .corner_rounding(4.)
-                .fill(if drag_target.is_none() && is_dragging {
+                .fill(if is_delete_target && is_dragging {
                     s.theme(Theme::Gray30).with_alpha(0.5)
                 } else {
                     TRANSPARENT
@@ -1153,7 +1271,7 @@ fn palette_swatch<'a>(
                 .build(app)
                 .inert(),
             svg(id!(index as u64), X_ICON)
-                .fill(if drag_target.is_none() && is_dragging {
+                .fill(if is_delete_target && is_dragging {
                     s.theme_inverted(Theme::Gray0)
                 } else {
                     TRANSPARENT
@@ -1179,56 +1297,124 @@ fn palette_swatch<'a>(
 }
 
 fn palette_sensor(index: usize, app: &mut PaneState) -> Layout<'static, View<State>, PaneState> {
+    let id = index as u64;
     rect(id!(index as u64))
         .fill(Color::TRANSPARENT)
         .view()
-        .on_hover(move |state: &mut State, _app, hovered| {
-            state.palette.hover[index] = hovered;
-            if state.palette.dragging.is_some() && hovered {
-                state.palette.drag_target = Some(index);
-            }
-        })
-        .on_click(MouseButton::Left, move |state: &mut State, app, event| {
-            if matches!(event.state, ClickPhase::Completed) {
-                if let Some(palette_values) = state.palette.colors[index] {
-                    state.values = palette_values;
-                    state.update_ui();
-                } else {
-                    state.palette.colors[index] = Some(state.values);
-                }
-                state.save_state(app);
-            }
-        })
-        .on_drag(move |state: &mut State, app, drag| match drag {
-            DragPhase::Began { .. } => {
-                if state.palette.colors[index].is_some() {
-                    state.palette.dragging = Some(index);
-                    state.palette.drag_offset = Point::ZERO;
-                    state.palette.drag_target = Some(index);
-                }
-            }
-            DragPhase::Updated { start, current, .. } => {
-                if state.palette.dragging == Some(index) {
-                    state.palette.drag_offset =
-                        Point::new(current.x - start.x, current.y - start.y);
-                }
-            }
-            DragPhase::Completed { .. } => {
-                if let Some(dragging_index) = state.palette.dragging {
-                    if let Some(target_index) = state.palette.drag_target {
-                        let dragging_color = state.palette.colors[dragging_index];
-                        let target_color = state.palette.colors[target_index];
-                        state.palette.colors[dragging_index] = target_color;
-                        state.palette.colors[target_index] = dragging_color;
-                    } else {
-                        state.palette.colors[dragging_index] = None;
+        .gesture(gesture::hover(id!(id, 0_u64)).observe().run(
+            move |state: &mut State, _app, hovered| {
+                state.palette.hover[index] = hovered;
+                if state.palette.dragging.is_some() {
+                    if hovered {
+                        state.palette.drag_target = PaletteDragTarget::Swatch(index);
+                    } else if state.palette.drag_target == PaletteDragTarget::Swatch(index) {
+                        state.palette.drag_target = PaletteDragTarget::None;
                     }
-                    state.palette.dragging = None;
-                    state.palette.drag_target = None;
-                    state.palette.drag_offset = Point::ZERO;
-                    state.save_state(app);
                 }
-            }
-        })
+            },
+        ))
+        .gesture(
+            gesture::click(id!(id, 1_u64))
+                .button(MouseButton::Left)
+                .run(move |state: &mut State, app, event| {
+                    if matches!(event.state, ClickPhase::Completed) {
+                        if let Some(palette_values) = state.palette.colors[index] {
+                            state.set_values(palette_values, app);
+                        } else {
+                            state.palette.colors[index] = Some(state.values);
+                        }
+                        state.save_state(app);
+                    }
+                }),
+        )
+        .gesture(gesture::drag(id!(id, 2_u64)).button(MouseButton::Left).run(
+            move |state: &mut State, app, drag| match drag {
+                DragPhase::Began { .. } => {
+                    if state.palette.colors[index].is_some() {
+                        state.palette.dragging = Some(index);
+                        state.palette.drag_offset = Point::ZERO;
+                        state.palette.drag_target = PaletteDragTarget::Swatch(index);
+                    }
+                }
+                DragPhase::Updated { start, current, .. } => {
+                    if state.palette.dragging == Some(index) {
+                        state.palette.drag_offset =
+                            Point::new(current.x - start.x, current.y - start.y);
+                    }
+                }
+                DragPhase::Completed { .. } => {
+                    if let Some(dragging_index) = state.palette.dragging {
+                        let changed = match state.palette.drag_target {
+                            PaletteDragTarget::Swatch(target_index) => {
+                                let dragging_color = state.palette.colors[dragging_index];
+                                let target_color = state.palette.colors[target_index];
+                                state.palette.colors[dragging_index] = target_color;
+                                state.palette.colors[target_index] = dragging_color;
+                                true
+                            }
+                            PaletteDragTarget::Delete => {
+                                state.palette.colors[dragging_index] = None;
+                                true
+                            }
+                            PaletteDragTarget::None => false,
+                        };
+                        if changed {
+                            state.save_state(app);
+                        }
+                        state.palette.dragging = None;
+                        state.palette.drag_target = PaletteDragTarget::None;
+                        state.palette.drag_offset = Point::ZERO;
+                    }
+                }
+            },
+        ))
         .build(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn right_click_format(pane: &mut Pane<State>, state: &mut State, index: usize) {
+        let location = pane.location(TEST_FORMAT_OVERLAY_IDS[index]).unwrap();
+        pane.move_to(state, location);
+        pane.press_button(state, MouseButton::Right);
+        pane.release_button(state, MouseButton::Right);
+        pane.redraw(state, 520, 360, 1.0);
+    }
+
+    #[test]
+    fn idle_hue_format_right_click_focus_rotates_after_each_field_has_been_focused() {
+        let mut state = State::default();
+        let mut pane = PaneBuilder::new("test", view).build();
+        pane.redraw(&mut state, 520, 360, 1.0);
+
+        for index in [0, 1, 2, 0] {
+            right_click_format(&mut pane, &mut state, index);
+            assert!(state.format_fields[index].editing);
+        }
+
+        pane.key_pressed(&mut state, "x");
+        assert_eq!(state.format_fields[0].text, "x");
+    }
+
+    #[test]
+    fn color_update_clears_app_format_editing_state() {
+        let mut state = State::default();
+        let mut pane = PaneBuilder::new("test", view).build();
+        pane.redraw(&mut state, 520, 360, 1.0);
+
+        for field in &mut state.format_fields {
+            field.editing = true;
+        }
+
+        let slider_location = pane.location(TEST_CHANNEL_SLIDER_IDS[0]).unwrap();
+        pane.click(
+            &mut state,
+            Point::new(slider_location.x - 80., slider_location.y),
+        );
+
+        assert_ne!(state.values[0], 0.7);
+        assert!(state.format_fields.iter().all(|field| !field.editing));
+    }
 }

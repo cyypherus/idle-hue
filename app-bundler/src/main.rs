@@ -2,7 +2,7 @@ use clap::Parser;
 use dotenv::dotenv;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Parser)]
@@ -198,6 +198,7 @@ fn build_targets(
             }
             "windows" => {
                 println!("Building for Windows (x86_64)...");
+                let icon_resource = prepare_windows_icon_resource(project_root)?;
                 let mut args = vec![
                     "build",
                     "--target",
@@ -214,6 +215,10 @@ fn build_targets(
                 }
                 let windows_status = Command::new("cargo")
                     .args(args)
+                    .env(
+                        "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS",
+                        windows_rustflags(&icon_resource),
+                    )
                     .current_dir(project_root)
                     .status()?;
 
@@ -231,6 +236,55 @@ fn build_targets(
     }
 
     Ok(())
+}
+
+fn prepare_windows_icon_resource(
+    project_root: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let icon_path = project_root.join("idle-hue/src/assets/icon.ico");
+    if !icon_path.exists() {
+        return Err(format!("Windows icon not found at {}", icon_path.display()).into());
+    }
+
+    let resource_dir = project_root.join("target/windows-resource");
+    fs::create_dir_all(&resource_dir)?;
+
+    let rc_path = resource_dir.join("idle-hue.rc");
+    let obj_path = resource_dir.join("idle-hue-icon.o");
+    fs::write(
+        &rc_path,
+        format!("1 ICON \"{}\"\n", escape_rc_path(&icon_path)),
+    )?;
+
+    let status = Command::new("x86_64-w64-mingw32-windres")
+        .arg(&rc_path)
+        .args(["-O", "coff", "-o"])
+        .arg(&obj_path)
+        .current_dir(project_root)
+        .status()?;
+
+    if !status.success() {
+        return Err("Failed to compile Windows icon resource".into());
+    }
+
+    Ok(obj_path)
+}
+
+fn windows_rustflags(icon_resource: &Path) -> String {
+    let mut rustflags =
+        env::var("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS").unwrap_or_default();
+    if !rustflags.is_empty() {
+        rustflags.push(' ');
+    }
+    rustflags.push_str("-C link-arg=");
+    rustflags.push_str(&icon_resource.to_string_lossy());
+    rustflags
+}
+
+fn escape_rc_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
 }
 
 fn create_zip_files(
