@@ -107,6 +107,26 @@ struct Channel {
     max: f32,
 }
 
+fn normalize_values(values: [f32; 3]) -> [f32; 3] {
+    [
+        if values[0].is_nan() {
+            CHANNELS[0].min
+        } else {
+            values[0].clamp(CHANNELS[0].min, CHANNELS[0].max)
+        },
+        if values[1].is_nan() {
+            CHANNELS[1].min
+        } else {
+            values[1].clamp(CHANNELS[1].min, CHANNELS[1].max)
+        },
+        if values[2].is_finite() {
+            values[2].rem_euclid(CHANNELS[2].max)
+        } else {
+            CHANNELS[2].min
+        },
+    ]
+}
+
 const COPY_ICON: &str = include_str!("assets/copy.svg");
 const CHECKMARK_ICON: &str = include_str!("assets/checkmark.svg");
 const PLUS_ICON: &str = include_str!("assets/plus.svg");
@@ -261,12 +281,12 @@ impl State {
     }
 
     fn set_values(&mut self, values: [f32; 3], app: &mut PaneState) {
-        self.values = values;
+        self.values = normalize_values(values);
         self.end_format_editing(app);
         self.update_ui();
     }
 
-    fn parse_format(&mut self, text: &str, app: &mut PaneState) -> bool {
+    fn parse_format(&mut self, text: &str) -> bool {
         let input = text.trim();
         let parsed = parse_color(input)
             .ok()
@@ -282,7 +302,8 @@ impl State {
             }
         };
         let c = oklch.components;
-        self.set_values([c[0], c[1], c[2]], app);
+        self.values = normalize_values([c[0], c[1], c[2]]);
+        self.update_ui();
         true
     }
 
@@ -410,7 +431,7 @@ fn on_start(state: &mut State, app: &mut PaneState) {
                 state.dark_mode = saved.dark_mode;
                 for (i, color) in saved.palette.into_iter().enumerate() {
                     if i < PALETTE_SIZE {
-                        state.palette.colors[i] = color;
+                        state.palette.colors[i] = color.map(normalize_values);
                     }
                 }
                 app.redraw();
@@ -604,10 +625,10 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                                     .highlight_fill(highlight_color)
                                                     .enter_end_editing()
                                                     .esc_end_editing()
-                                                    .on_edit(move |state, app, edit| match edit {
+                                                    .on_edit(move |state, _app, edit| match edit {
                                                         EditInteraction::Start => {}
                                                         EditInteraction::Update(text) => {
-                                                            state.parse_format(&text, app);
+                                                            state.parse_format(&text);
                                                         }
                                                         EditInteraction::End => {
                                                             state.update_ui();
@@ -841,7 +862,7 @@ fn text_popover_layer<'a>(
         move |state, app| {
             if state.format_fields[field].cut_text(app).is_some() {
                 let text = state.format_fields[field].text.clone();
-                state.parse_format(&text, app);
+                state.parse_format(&text);
             }
         },
     );
@@ -881,8 +902,6 @@ fn text_popover_layer<'a>(
         app,
         move |state, app| {
             state.format_fields[field].paste_text(app);
-            let text = state.format_fields[field].text.clone();
-            state.parse_format(&text, app);
         },
     );
 
@@ -1241,7 +1260,7 @@ fn palette_swatch<'a>(
     s: &'a State,
     app: &mut PaneState,
 ) -> Layout<'a, View<State>, PaneState> {
-    stack(vec![
+    let swatch = stack(vec![
         rect(id!(index as u64))
             .fill(swatch_color.unwrap_or(s.theme(Theme::Gray30)))
             .stroke(
@@ -1293,7 +1312,8 @@ fn palette_swatch<'a>(
         } else {
             0.0
         },
-    )
+    );
+    if is_dragging { swatch.layer(1) } else { swatch }
 }
 
 fn palette_sensor(index: usize, app: &mut PaneState) -> Layout<'static, View<State>, PaneState> {
@@ -1416,5 +1436,33 @@ mod tests {
 
         assert_ne!(state.values[0], 0.7);
         assert!(state.format_fields.iter().all(|field| !field.editing));
+    }
+
+    #[test]
+    fn parsed_format_update_keeps_format_field_editing() {
+        let mut state = State::default();
+        state.format_fields[1].editing = true;
+
+        assert!(state.parse_format("red"));
+
+        assert_ne!(state.values, [0.7, 0.15, 180.0]);
+        assert!(state.format_fields[1].editing);
+    }
+
+    #[test]
+    fn parsed_oklch_values_stay_inside_slider_ranges() {
+        let parsed = parse_color("oklch(0.7 4.2 900)").unwrap();
+        let oklch: AlphaColor<Oklch> = parsed.to_alpha_color();
+        let c = oklch.components;
+
+        assert_eq!(normalize_values([c[0], c[1], c[2]]), [0.7, 0.4, 180.0]);
+    }
+
+    #[test]
+    fn direct_color_updates_stay_inside_slider_ranges() {
+        assert_eq!(
+            normalize_values([f32::NAN, f32::INFINITY, -30.0]),
+            [0.0, 0.4, 330.0],
+        );
     }
 }

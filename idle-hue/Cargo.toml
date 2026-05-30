@@ -7,7 +7,7 @@ edition = "2024"
 prod = []
 
 [dependencies]
-haven = { path = "../../haven", features = ["debug-overlay"]}
+haven = { path = "../../haven"}
 # haven = { git = "https://github.com/cyypherus/haven", branch = "proj", features = ["debug-overlay"]}
 arboard = "3.4"
 serde = { workspace = true }
