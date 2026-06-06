@@ -474,7 +474,7 @@ fn on_wake(state: &mut State, app: &mut PaneState) {
     }
 }
 
-fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneState> {
+fn view<'a>(s: &'a State, app: &mut PaneState) -> View<'a, State> {
     let bg = s.theme(Theme::Gray0);
     let field_bg = s.theme(Theme::Gray30);
     let field_border = s.theme(Theme::Gray50);
@@ -497,8 +497,7 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                 10.,
                 vec![
                     row_spaced(10., {
-                        let mut buttons: Vec<Layout<'_, View<State>, PaneState>> =
-                            vec![space().inert_y()];
+                        let mut buttons: Vec<View<'_, State>> = vec![space().inert_y()];
                         #[cfg(not(target_os = "windows"))]
                         buttons.push(
                             button(
@@ -623,6 +622,7 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                                     .text_fill(label_color)
                                                     .cursor_fill(label_color)
                                                     .highlight_fill(highlight_color)
+                                                    .singleline()
                                                     .enter_end_editing()
                                                     .esc_end_editing()
                                                     .on_edit(move |state, _app, edit| match edit {
@@ -637,10 +637,7 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                                     .background(move |_, _, ctx| {
                                                         rect(id!(i as u64))
                                                             .fill(s.theme(Theme::Gray30))
-                                                            .stroke(
-                                                                s.display_color(),
-                                                                Stroke::new(1.),
-                                                            )
+                                                            .stroke(field_border, Stroke::new(1.))
                                                             .corner_rounding(6.)
                                                             .build(ctx)
                                                     })
@@ -799,7 +796,7 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneSt
                                         channel_slider(
                                             id!(i as u64),
                                             i,
-                                            binding!(s, State, sliders),
+                                            binding!(s.sliders),
                                             s.values,
                                             s.theme_inverted(Theme::Gray0),
                                             app,
@@ -837,7 +834,7 @@ fn text_popover_layer<'a>(
     field_border: Color,
     label_color: Color,
     app: &mut PaneState,
-) -> Layout<'a, View<State>, PaneState> {
+) -> View<'a, State> {
     let Some(popover) = s.text_popover.as_ref() else {
         return empty();
     };
@@ -968,7 +965,7 @@ fn context_menu_button<'a>(
     label_color: Color,
     app: &mut PaneState,
     on_click: impl Fn(&mut State, &mut PaneState) + 'static,
-) -> Layout<'a, View<State>, PaneState> {
+) -> View<'a, State> {
     button(id!(action_id, 0_u64), state)
         .surface(move |btn, ctx| {
             rect(id!(action_id, 1_u64))
@@ -1006,7 +1003,7 @@ fn shortcut_view<'a>(
     key: &'static str,
     color: Color,
     app: &mut PaneState,
-) -> Layout<'a, View<State>, PaneState> {
+) -> View<'a, State> {
     let color = color.with_alpha(0.7);
     if cfg!(target_os = "macos") {
         row_spaced(
@@ -1031,11 +1028,7 @@ fn shortcut_view<'a>(
     }
 }
 
-fn update_button<'a>(
-    s: &'a State,
-    label_color: Color,
-    app: &mut PaneState,
-) -> Layout<'a, View<State>, PaneState> {
+fn update_button<'a>(s: &'a State, label_color: Color, app: &mut PaneState) -> View<'a, State> {
     let status = &s.update_status;
     let btn = s.update_button;
     let label_text = match status {
@@ -1055,7 +1048,7 @@ fn update_button<'a>(
         }
     };
     let gray = s.theme(Theme::Gray70);
-    button(id!(), binding!(s, State, update_button))
+    button(id!(), binding!(s.update_button))
         .surface(move |_, _ctx| space().height(0.).width(0.))
         .label(move |btn, ctx| {
             let c = if btn.hovered { label_color } else { gray };
@@ -1107,7 +1100,7 @@ fn channel_slider<'a>(
     values: [f32; 3],
     knob_color: Color,
     app: &mut PaneState,
-) -> Layout<'a, View<State>, PaneState> {
+) -> View<'a, State> {
     let ch = &CHANNELS[i];
     #[cfg(test)]
     let slider_id = TEST_CHANNEL_SLIDER_IDS[i];
@@ -1183,7 +1176,7 @@ fn palette_color(values: [f32; 3]) -> Color {
     AlphaColor::<Oklch>::new([values[0], values[1], values[2], 1.0]).convert::<Srgb>()
 }
 
-fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> Layout<'a, View<State>, PaneState> {
+fn palette_grid<'a>(s: &'a State, app: &mut PaneState) -> View<'a, State> {
     let rows = (0..PALETTE_HEIGHT)
         .map(|row| {
             let cols = (0..PALETTE_WIDTH)
@@ -1259,7 +1252,7 @@ fn palette_swatch<'a>(
     is_delete_target: bool,
     s: &'a State,
     app: &mut PaneState,
-) -> Layout<'a, View<State>, PaneState> {
+) -> View<'a, State> {
     let swatch = stack(vec![
         rect(id!(index as u64))
             .fill(swatch_color.unwrap_or(s.theme(Theme::Gray30)))
@@ -1316,7 +1309,7 @@ fn palette_swatch<'a>(
     if is_dragging { swatch.layer(1) } else { swatch }
 }
 
-fn palette_sensor(index: usize, app: &mut PaneState) -> Layout<'static, View<State>, PaneState> {
+fn palette_sensor(index: usize, app: &mut PaneState) -> View<'static, State> {
     let id = index as u64;
     rect(id!(index as u64))
         .fill(Color::TRANSPARENT)
