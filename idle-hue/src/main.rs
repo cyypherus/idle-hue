@@ -631,7 +631,13 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> View<'a, State> {
                                                             state.parse_format(&text);
                                                         }
                                                         EditInteraction::End => {
-                                                            state.update_ui();
+                                                            let val = state.formats()[i].clone();
+                                                            state.format_fields[i] =
+                                                                TextState::new(if i == 0 {
+                                                                    val.to_uppercase()
+                                                                } else {
+                                                                    val
+                                                                });
                                                         }
                                                     })
                                                     .background(move |_, _, ctx| {
@@ -1409,6 +1415,25 @@ mod tests {
 
         pane.key_pressed(&mut state, "x");
         assert_eq!(state.format_fields[0].text, "x");
+    }
+
+    #[test]
+    fn idle_hue_left_click_between_format_fields_preserves_click_cursor() {
+        let mut state = State::default();
+        let mut pane = PaneBuilder::new("test", view).build();
+        pane.redraw(&mut state, 520, 360, 1.0);
+
+        let first = pane.location(TEST_FORMAT_OVERLAY_IDS[0]).unwrap();
+        pane.click(&mut state, first);
+        pane.redraw(&mut state, 520, 360, 1.0);
+
+        let second = pane.location(TEST_FORMAT_OVERLAY_IDS[1]).unwrap();
+        pane.click(&mut state, second);
+        pane.redraw(&mut state, 520, 360, 1.0);
+        pane.key_pressed(&mut state, "x");
+
+        assert!(state.format_fields[1].editing);
+        assert!(!state.format_fields[1].text.starts_with('x'));
     }
 
     #[test]
