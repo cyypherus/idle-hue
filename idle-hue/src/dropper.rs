@@ -1,6 +1,12 @@
+#[cfg(not(target_os = "windows"))]
 use std::sync::Arc;
+#[cfg(not(target_os = "windows"))]
 use tokio::sync::oneshot;
 
+#[cfg(target_os = "windows")]
+pub(crate) mod windows;
+
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn sample_color() -> oneshot::Receiver<Option<[f32; 3]>> {
     let (tx, rx) = oneshot::channel();
     let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -19,13 +25,13 @@ pub(crate) fn sample_color() -> oneshot::Receiver<Option<[f32; 3]>> {
                 let color = unsafe { &*color };
                 let srgb_space = NSColorSpace::sRGBColorSpace();
                 let srgb_color = color.colorUsingColorSpace(&srgb_space);
-                srgb_color.map(|c|
+                srgb_color.map(|c| {
                     [
                         c.redComponent() as f32,
                         c.greenComponent() as f32,
                         c.blueComponent() as f32,
                     ]
-                )
+                })
             };
             if let Some(tx) = tx.lock().unwrap().take() {
                 let _ = tx.send(result);

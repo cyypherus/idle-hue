@@ -3,7 +3,6 @@
 #![allow(clippy::too_many_arguments)]
 
 mod auto_update;
-#[cfg(not(target_os = "windows"))]
 mod dropper;
 
 #[cfg(target_os = "windows")]
@@ -162,7 +161,6 @@ fn btn_label_color(btn: ButtonState, base: Color) -> Color {
 const SUN_ICON: &str = include_str!("assets/sun.svg");
 const MOON_ICON: &str = include_str!("assets/moon.svg");
 
-#[cfg(not(target_os = "windows"))]
 const DROPPER_ICON: &str = include_str!("assets/dropper.svg");
 
 struct State {
@@ -175,8 +173,9 @@ struct State {
     text_popover: Option<TextPopover>,
     dark_mode: bool,
     dark_mode_button: ButtonState,
-    #[cfg(not(target_os = "windows"))]
     dropper_button: ButtonState,
+    #[cfg(target_os = "windows")]
+    dropper: dropper::windows::WindowsDropper,
     update_button: ButtonState,
     update_status: UpdateStatus,
     palette: PaletteState,
@@ -286,6 +285,13 @@ impl State {
         self.update_ui();
     }
 
+    fn set_srgb(&mut self, rgb: [f32; 3], app: &mut PaneState) {
+        let srgb = AlphaColor::<Srgb>::new([rgb[0], rgb[1], rgb[2], 1.0]);
+        let oklch: AlphaColor<Oklch> = srgb.convert();
+        let c = oklch.components;
+        self.set_values([c[0], c[1], c[2]], app);
+    }
+
     fn parse_format(&mut self, text: &str) -> bool {
         let input = text.trim();
         let parsed = parse_color(input)
@@ -354,8 +360,9 @@ impl Default for State {
             text_popover: None,
             dark_mode: true,
             dark_mode_button: Default::default(),
-            #[cfg(not(target_os = "windows"))]
             dropper_button: Default::default(),
+            #[cfg(target_os = "windows")]
+            dropper: dropper::windows::WindowsDropper::new(),
             update_button: Default::default(),
             update_status: UpdateStatus::Idle,
             palette: PaletteState::default(),
@@ -371,7 +378,7 @@ async fn main() {
     #[cfg(target_os = "windows")]
     set_app_user_model_id();
 
-    WinitApp::new(State::default())
+    let app = WinitApp::new(State::default())
         .window_icon(app_icon())
         .pane(
             PaneBuilder::new("main", view)
@@ -382,8 +389,12 @@ async fn main() {
                 .on_exit(|state, app| {
                     state.save_state(app);
                 }),
-        )
-        .run()
+        );
+
+    #[cfg(target_os = "windows")]
+    let app = dropper::windows::add_pane(app);
+
+    app.run()
 }
 
 #[cfg(target_os = "windows")]
@@ -498,7 +509,6 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> View<'a, State> {
                 vec![
                     row_spaced(10., {
                         let mut buttons: Vec<View<'_, State>> = vec![space().inert_y()];
-                        #[cfg(not(target_os = "windows"))]
                         buttons.push(
                             button(
                                 id!(),
@@ -524,18 +534,20 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> View<'a, State> {
                                     .pad(6.)
                             })
                             .on_click(|state, app| {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    state.dropper.start();
+                                    app.open("dropper");
+                                }
+                                #[cfg(not(target_os = "windows"))]
+                                {
                                 let tx = state.tx.clone();
                                 let wake = app.waker();
                                 tokio::spawn(async move {
                                     if let Ok(Some(rgb)) = dropper::sample_color().await {
                                         tx.send(Box::new(
                                             move |state: &mut State, app: &mut PaneState| {
-                                                let srgb = AlphaColor::<Srgb>::new([
-                                                    rgb[0], rgb[1], rgb[2], 1.0,
-                                                ]);
-                                                let oklch: AlphaColor<Oklch> = srgb.convert();
-                                                let c = oklch.components;
-                                                state.set_values([c[0], c[1], c[2]], app);
+                                                state.set_srgb(rgb, app);
                                                 app.redraw();
                                             },
                                         ))
@@ -543,6 +555,7 @@ fn view<'a>(s: &'a State, app: &mut PaneState) -> View<'a, State> {
                                         wake.wake();
                                     }
                                 });
+                                }
                             })
                             .build(app)
                             .height(30.)
