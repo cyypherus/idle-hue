@@ -26,7 +26,6 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
       VERSION_SERVER_API_KEY: ${{ secrets.VERSION_SERVER_API_KEY }}
       APP_UPDATE_REPO_TOKEN: ${{ secrets.APP_UPDATE_REPO_TOKEN }}
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -62,10 +61,10 @@ jobs:
         run: |
           test -n "$APPLE_CERTIFICATE_BASE64"
           test -n "$APPLE_CERTIFICATE_PASSWORD"
-          test -n "$KEYCHAIN_PASSWORD"
           test -n "$APPLE_TEAM_ID"
           test -n "$APPLE_ID"
           test -n "$APPLE_APP_SPECIFIC_PASSWORD"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
           CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
           echo "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
