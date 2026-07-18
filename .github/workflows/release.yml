@@ -18,6 +18,8 @@ permissions:
 jobs:
   deploy:
     runs-on: macos-14
+    environment:
+      name: ${{ github.event_name == 'release' && 'production' || inputs.environment }}
     env:
       APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -26,7 +28,7 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
       VERSION_SERVER_API_KEY: ${{ secrets.VERSION_SERVER_API_KEY }}
-      GITHUB_TOKEN: ${{ github.token }}
+      APP_UPDATE_REPO_TOKEN: ${{ secrets.APP_UPDATE_REPO_TOKEN }}
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       DEPLOY_PROD: ${{ github.event_name == 'release' || inputs.environment == 'production' }}
     steps:
@@ -40,9 +42,11 @@ jobs:
           repository: cyypherus/app-update
           path: app-update
           ref: main
+          token: ${{ secrets.APP_UPDATE_REPO_TOKEN }}
+          persist-credentials: false
 
       - name: Configure git access
-        run: git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf https://github.com/
+        run: git config --global url."https://x-access-token:${APP_UPDATE_REPO_TOKEN}@github.com/".insteadOf https://github.com/
 
       - uses: dtolnay/rust-toolchain@stable
         with:
