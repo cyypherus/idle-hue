@@ -9,6 +9,7 @@ mod dropper;
 #[cfg(target_os = "windows")]
 use ::winit::platform::windows::IconExtWindows;
 use ::winit::window::Icon;
+use app_update::restart_application;
 use arboard::Clipboard;
 use auto_update::{AutoUpdater, UpdateStatus};
 use color::{AlphaColor, ColorSpaceTag, Oklch, Srgb, parse_color};
@@ -1063,7 +1064,7 @@ fn update_button<'a>(s: &'a State, label_color: Color, app: &mut PaneState) -> V
         .on_click(move |state, app| {
             if matches!(state.update_status, UpdateStatus::Updated { .. }) {
                 tokio::spawn(async move {
-                    if let Err(e) = AutoUpdater::restart_application().await {
+                    if let Err(e) = restart_application().await {
                         log::error!("Failed to restart: {e}");
                     }
                 });
