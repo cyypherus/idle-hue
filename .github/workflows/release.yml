@@ -17,81 +17,11 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: macos-14
-    environment:
-      name: ${{ github.event_name == 'release' && 'production' || inputs.environment }}
-    env:
-      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      VERSION_SERVER_API_KEY: ${{ secrets.VERSION_SERVER_API_KEY }}
-      APP_UPDATE_REPO_TOKEN: ${{ secrets.APP_UPDATE_REPO_TOKEN }}
-      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-      DEPLOY_PROD: ${{ github.event_name == 'release' || inputs.environment == 'production' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: idle-hue
-          ref: ${{ github.event.release.tag_name || github.ref }}
-
-      - uses: actions/checkout@v4
-        with:
-          repository: cyypherus/app-update
-          path: app-update
-          ref: main
-          token: ${{ secrets.APP_UPDATE_REPO_TOKEN }}
-          persist-credentials: false
-
-      - name: Configure git access
-        run: git config --global url."https://x-access-token:${APP_UPDATE_REPO_TOKEN}@github.com/".insteadOf https://github.com/
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin,x86_64-pc-windows-gnu
-
-      - name: Install build tools
-        run: |
-          brew install mingw-w64
-          cargo install cargo-bundle
-
-      - name: Import signing certificate
-        working-directory: idle-hue
-        run: |
-          test -n "$APPLE_CERTIFICATE_BASE64"
-          test -n "$APPLE_CERTIFICATE_PASSWORD"
-          test -n "$APPLE_TEAM_ID"
-          test -n "$APPLE_ID"
-          test -n "$APPLE_APP_SPECIFIC_PASSWORD"
-          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
-          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-
-      - name: Verify release version
-        working-directory: idle-hue
-        run: |
-          PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "idle-hue") | .version')"
-          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            test "$VERSION" = "$PACKAGE_VERSION"
-          else
-            VERSION="$PACKAGE_VERSION"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build and deploy
-        working-directory: idle-hue
-        run: |
-          if [ "$DEPLOY_PROD" = "true" ]; then
-            cargo run --release --package app-bundler -- --upload-prod
-          else
-            cargo run --release --package app-bundler --
-          fi
+    uses: cyypherus/app-update/.github/workflows/release.yml@main
+    with:
+      environment: ${{ github.event_name == 'release' && 'production' || inputs.environment }}
+      app_name: idle-hue
+      package: idle-hue
+      binary: idle-hue
+      project_path: app
+      windows_icon: idle-hue/src/assets/icon.ico
