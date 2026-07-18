@@ -2,10 +2,6 @@
 members = [
     "idle-hue",
     "app-bundler",
-    "version-api",
-    "version-api-cli",
-    "version-api-client",
-    "version-api-models",
 ]
 resolver = "2"
 
@@ -13,8 +9,6 @@ resolver = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.43.0", features = ["macros"] }
-chrono = { version = "0.4", features = ["serde"] }
-anyhow = "1.0"
 
 [profile.release]
 opt-level = 3

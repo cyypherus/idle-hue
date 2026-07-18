@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // Load .env file
-    dotenv().unwrap();
+    dotenv().ok();
 
     let project_root = std::env::current_dir()?;
     println!("Project root: {}", project_root.display());
@@ -404,16 +404,17 @@ fn upload_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Build the CLI first
     println!("Building CLI...");
+    let app_update_root = project_root.join("../app-update");
     let cli_build_status = Command::new("cargo")
-        .args(["build", "--release", "--package", "version-api-cli"])
-        .current_dir(project_root)
+        .args(["build", "--release", "--package", "app-update-cli"])
+        .current_dir(&app_update_root)
         .status()?;
 
     if !cli_build_status.success() {
         return Err("Failed to build CLI".into());
     }
 
-    let cli_path = project_root.join("target/release/version-api-cli");
+    let cli_path = app_update_root.join("target/release/app-update-cli");
     if !cli_path.exists() {
         return Err("CLI executable not found".into());
     }

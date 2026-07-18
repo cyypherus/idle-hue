@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 dotenv = "0.15"
 clap = { version = "4.0", features = ["derive"] }
-version-api-models = { path = "../version-api-models" }
 
 [features]
 prod = []
