@@ -1,8 +1,6 @@
 name: Release
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       environment:
@@ -11,6 +9,10 @@ on:
         default: dev
         type: choice
         options: [dev, production]
+      tag:
+        description: Release tag to deploy
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +21,8 @@ jobs:
   deploy:
     uses: cyypherus/app-update/.github/workflows/release.yml@main
     with:
-      environment: ${{ github.event_name == 'release' && 'production' || inputs.environment }}
+      environment: ${{ inputs.environment }}
+      tag: ${{ inputs.tag }}
       app_name: idle-hue
       package: idle-hue
       binary: idle-hue
