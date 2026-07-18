@@ -25,3 +25,11 @@ jobs:
       binary: idle-hue
       project_path: app
       windows_icon: idle-hue/src/assets/icon.ico
+    secrets:
+      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APP_UPDATE_REPO_TOKEN: ${{ secrets.APP_UPDATE_REPO_TOKEN }}
+      VERSION_SERVER_API_KEY: ${{ secrets.VERSION_SERVER_API_KEY }}
