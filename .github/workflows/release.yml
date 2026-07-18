@@ -58,7 +58,6 @@ jobs:
           cargo install cargo-bundle
 
       - name: Import signing certificate
-        if: env.DEPLOY_PROD == 'true'
         working-directory: idle-hue
         run: |
           test -n "$APPLE_CERTIFICATE_BASE64"
@@ -96,5 +95,5 @@ jobs:
           if [ "$DEPLOY_PROD" = "true" ]; then
             cargo run --release --package app-bundler -- --upload-prod
           else
-            cargo run --release --package app-bundler -- --skip-codesign
+            cargo run --release --package app-bundler --
           fi
